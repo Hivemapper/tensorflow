@@ -276,7 +276,7 @@ def tf_copts(android_optimization_level_override = "-O2", is_external = False):
             "-DEIGEN_AVOID_STL_ARRAY",
             "-Iexternal/gemmlowp",
             "-Wno-sign-compare",
-            "-fno-exceptions",
+            #            "-fno-exceptions",
             "-ftemplate-depth=900",
         ]) +
         if_cuda(["-DGOOGLE_CUDA=1"]) +
@@ -1290,8 +1290,7 @@ def tf_kernel_library(
     if gpu_srcs:
         for gpu_src in gpu_srcs:
             if gpu_src.endswith(".cc") and not gpu_src.endswith(".cu.cc"):
-                fail("{} not allowed in gpu_srcs. .cc sources must end with .cu.cc"
-                    .format(gpu_src))
+                fail("{} not allowed in gpu_srcs. .cc sources must end with .cu.cc".format(gpu_src))
         tf_gpu_kernel_library(
             name = name + "_gpu",
             srcs = gpu_srcs,
