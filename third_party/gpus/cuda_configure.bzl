@@ -146,10 +146,8 @@ def _get_python_bin(repository_ctx):
 def _get_nvcc_tmp_dir_for_windows(repository_ctx):
     """Return the tmp directory for nvcc to generate intermediate source files."""
     escaped_tmp_dir = escape_string(
-        get_env_var(repository_ctx, "TMP", "C:\\Windows\\Temp").replace(
-            "\\",
-            "\\\\",
-        ),
+        # get_env_var(repository_ctx, "TMP", "C:\\Windows\\Temp").replace(
+        get_env_var(repository_ctx, "TMP", "/tmp")
     )
     return escaped_tmp_dir + "\\\\nvcc_inter_files_tmp_dir"
 
