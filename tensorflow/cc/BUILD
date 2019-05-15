@@ -720,6 +720,45 @@ tf_cc_binary(
     ],
 )
 
+tf_cc_binary(
+    name = "inference",
+    srcs = ["inference.cpp"],
+    copts = tf_copts(),
+    linkopts = select({
+        "//tensorflow:windows": [],
+        "//tensorflow:macos": [
+            "-lm",
+            "-lpthread",
+        ],
+        "//tensorflow:ios": [
+            "-lm",
+            "-lpthread",
+        ],
+        "//conditions:default": [
+            "-lm",
+            "-lpthread",
+            "-lrt",
+            "-lopencv_core",
+            "-lopencv_highgui",
+            "-lopencv_imgproc",
+        ],
+    }),
+    deps = [
+        ":cc_ops",
+        ":client_session",
+        "//tensorflow/cc/saved_model:loader",
+        "//tensorflow/cc/saved_model:tag_constants",
+        "//tensorflow/contrib/image:image_ops_kernels",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+        "//tensorflow/tools/graph_transforms:file_utils",
+        "//tensorflow/tools/graph_transforms:transform_utils",
+    ],
+)
+
 cc_library(
     name = "queue_runner",
     srcs = ["training/queue_runner.cc"],
