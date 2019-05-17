@@ -741,6 +741,7 @@ tf_cc_binary(
             "-lopencv_core",
             "-lopencv_highgui",
             "-lopencv_imgproc",
+            "-ltiff",
         ],
     }),
     deps = [
