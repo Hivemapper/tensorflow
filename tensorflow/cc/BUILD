@@ -736,11 +736,10 @@ tf_cc_binary(
         ],
         "//conditions:default": [
             "-lm",
-            "-lpthread",
-            "-lrt",
             "-lopencv_core",
             "-lopencv_highgui",
             "-lopencv_imgproc",
+            "-lopencv_imgcodecs",
             "-ltiff",
         ],
     }),
