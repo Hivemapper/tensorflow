@@ -1,5 +1,5 @@
 //
-// Created by david on 5/3/19.
+// Created by David Hattery on 5/3/19.
 //
 
 
@@ -81,9 +81,12 @@ using ::tensorflow::Tensor;
 using ::tensorflow::Status;
 using ::tensorflow::string;
 using ::tensorflow::int32;
+using ::tensorflow::GraphDef;
+using ::tensorflow::Scope;
+using ::tensorflow::Session;
+using ::tensorflow::SessionOptions;
 //using namespace cv;
 
-namespace tensorflow {
 namespace hive_segmentation {
 
 //static Status ReadEntireFile(Env *env, const string &filename,
@@ -231,11 +234,11 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
 
   if (placeholders.empty()) {
     std::cout << "No inputs spotted." << std::endl;
-    return errors::OutOfRange("No inputs");
+    return tensorflow::errors::OutOfRange("No inputs");
   } else {
 //    std::cout << "Found " << placeholders.size() << " possible inputs: ";
     if(placeholders.size() != 1){
-      return errors::OutOfRange("Too many inputs to choose from.");
+      return tensorflow::errors::OutOfRange("Too many inputs to choose from.");
     }
     for (const tensorflow::NodeDef* node : placeholders) {
       string shape_description = "None";
@@ -258,16 +261,16 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
           *input_channels = int32(tensorflow::PartialTensorShape(shape_proto).dim_size(3));
         } else {
           shape_description = shape_status.error_message();
-          return errors::OutOfRange(shape_status.error_message());
+          return tensorflow::errors::OutOfRange(shape_status.error_message());
         }
       } else {
-        return errors::OutOfRange("Unknown shape size.");
+        return tensorflow::errors::OutOfRange("Unknown shape size.");
       }
     }
 //    std::cout << std::endl;
   }
   if(int32(*input_channels) != 3) {
-    return errors::OutOfRange("Model graph does not have 3 input channels");
+    return tensorflow::errors::OutOfRange("Model graph does not have 3 input channels");
   }
 
   std::map<string, std::vector<const tensorflow::NodeDef*>> output_map;
@@ -283,11 +286,11 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
 
   if (output_nodes.empty()) {
     std::cout << "No outputs spotted." << std::endl;
-    return errors::OutOfRange("No outputs");
+    return tensorflow::errors::OutOfRange("No outputs");
   } else {
 //    std::cout << "Found " << output_nodes.size() << " possible outputs: ";
     if(output_nodes.size() != 1){
-      return errors::OutOfRange("Too many outputs to choose from.");
+      return tensorflow::errors::OutOfRange("Too many outputs to choose from.");
     }
     for (const tensorflow::NodeDef* node : output_nodes) {
 //      std::cout << "(name=" << node->name();
@@ -310,11 +313,11 @@ Status LoadGraph(const string &graph_file_name,
   GraphDef graph_def;
   Status load_graph_status = tensorflow::graph_transforms::LoadTextOrBinaryGraphFile(graph_file_name, &graph_def);
   if (!load_graph_status.ok()) {
-    return errors::NotFound("Failed to load compute graph at '", graph_file_name, "'");
+    return tensorflow::errors::NotFound("Failed to load compute graph at '", graph_file_name, "'");
   }
   Status parse_graph_status = ParseGraph(&graph_def, input_layer, output_layer, input_batch_size, input_width, input_height, input_channels);
   if (!parse_graph_status.ok()) {
-    return errors::FailedPrecondition("Failed to parse compute graph at '", graph_file_name, "'");
+    return tensorflow::errors::FailedPrecondition("Failed to parse compute graph at '", graph_file_name, "'");
   }
 
   session->reset(NewSession(SessionOptions()));
@@ -326,20 +329,13 @@ Status LoadGraph(const string &graph_file_name,
 }
 
 } // end hive_segmentation namespace
-} // end tensorflow namespace
 
 
 int main(int argc, char *argv[]) {
-//  using namespace ::cv;
-//  using ::std::string;
-//  using namespace std;
   // These are the command-line flags the program can understand.
-  // They define where the graph and input data is located, and what kind of
-  // input the model expects. If you train your own model, or use something
-  // other than inception_v3, then you'll need to update these.
-  // TODO input should be list of files
+  // TODO input should be list of files or a file name containing a list of files and a corresponding file with a list of output file names
   // input should include resize scale percent
-  double scale_percent = 100;
+  float scale_percent = 100;
   string image_filename = "2016-tesla-model-s-17-of-43.jpg";
   string image_result_filename = "2016-tesla-model-s-17-of-43.tif";
   string graph = "my_model.pb";
@@ -355,18 +351,21 @@ int main(int argc, char *argv[]) {
   string input_layer = "input_3";
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
-  bool self_test = false;
+//  bool self_test = false;
   string root_dir = "/home/david/test_output";
+  // Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
-      Flag("image", &image_filename, "image to be processed"),
-      Flag("results", &image_result_filename, "processed image results"),
+      Flag("image", &image_filename, "full path image to be processed"),
+      Flag("results", &image_result_filename, "full path processed image results"),
+      Flag("scale", &scale_percent, "percent to scale output results"),
       Flag("graph", &graph, "graph to be executed"),
-      Flag("input_width", &input_width, "resize image to this width in pixels"),
-      Flag("input_height", &input_height, "resize image to this height in pixels"),
-      Flag("input_layer", &input_layer, "name of input layer"),
-      Flag("output_layer", &output_layer, "name of output layer"),
-      Flag("self_test", &self_test, "run a self test"),
-      Flag("root_dir", &root_dir, "interpret image and graph file names relative to this directory"),
+      Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
+      // These are now done automatically or no longer used
+//      Flag("input_width", &input_width, "resize image to this width in pixels"),
+//      Flag("input_height", &input_height, "resize image to this height in pixels"),
+//      Flag("input_layer", &input_layer, "name of input layer"),
+//      Flag("output_layer", &output_layer, "name of output layer"),
+//      Flag("self_test", &self_test, "run a self test"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -396,7 +395,7 @@ int main(int argc, char *argv[]) {
 ////  tensorflow::LoadSavedModel(session_options, run_options, export_dir, {kSavedModelTagServe}, &bundle);
 
   string graph_path = tensorflow::io::JoinPath(root_dir, graph);
-  Status load_graph_status = tensorflow::hive_segmentation::LoadGraph(graph_path, &session, input_layer, output_layer, &input_batch_size, &input_width, &input_height, &input_channels);
+  Status load_graph_status = ::hive_segmentation::LoadGraph(graph_path, &session, input_layer, output_layer, &input_batch_size, &input_width, &input_height, &input_channels);
   if (!load_graph_status.ok()) {
     LOG(ERROR) << load_graph_status;
     return -1;
@@ -514,11 +513,15 @@ int main(int argc, char *argv[]) {
   // TODO test
 //  final_image_width = final_image_height;
   std::vector<Tensor> resized_outputs;
-  for(auto const &output : outputs) { // TODO check for only one output here
-    output_classes = uint(output.shape().dim_size(3));
-    std::cout << "Output shape " << output.shape() << " and dims " << output.shape().dims() << " classes " << output_classes << std::endl;
-    Status resize_status = tensorflow::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
+  if ( outputs.size() != 1 ) {
+    std::cout << "Error: invalid number of outputs: " << outputs.size() << std::endl;
+    return -1;
   }
+  auto const &output = outputs[0];
+  output_classes = uint(output.shape().dim_size(3));
+  std::cout << "Output shape " << output.shape() << " and dims " << output.shape().dims() << " classes " << output_classes << std::endl;
+  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
+
   std::cout << "Resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
 
 
@@ -535,14 +538,21 @@ int main(int argc, char *argv[]) {
 
 // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
   float min_class, max_class;
-  Status min_status = tensorflow::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
-  Status max_status = tensorflow::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
-  // TODO check above status
+  Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
+  if (!min_status.ok()) {
+    LOG(ERROR) << "Getting min_class for normalization failed: " << min_status;
+    return -1;
+  }
+  Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
+  if (!max_status.ok()) {
+    LOG(ERROR) << "Getting max_class for normalization failed: " << max_status;
+    return -1;
+  }
   auto range_class = max_class - min_class;
   std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
 
 
-  // TODO output class
+  // TODO make this output class/method
   auto tensor_resized_output_map = (resized_outputs[0]).tensor<float, 4>();
   // get the underlying array
   auto resized_output_array = tensor_resized_output_map.data();
@@ -554,7 +564,7 @@ int main(int argc, char *argv[]) {
   float blending_factor[final_image_width];
   int overlap = (2 * final_image_height) - final_image_width;
   int offset = final_image_width - final_image_height;
-  for (int i; i < final_image_width; i++) {
+  for (int i = 0; i < final_image_width; i++) {
     if ( sub_images.size() == 1 ) { // only one output so no blending will be done
       blending_factor[i] = 0;
     } else {
