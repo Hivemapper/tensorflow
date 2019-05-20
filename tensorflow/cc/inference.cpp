@@ -264,7 +264,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Model c: " << input_channels << std::endl;
 
 
-  // TODO repeat this for all images in scene
+  // TODO repeat the following for all images in scene
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
   std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
@@ -275,8 +275,6 @@ int main(int argc, char *argv[]) {
     LOG(ERROR) <<  "Error: Could not open or find the image" << image_filename;
     return -1;
   }
-
-
   // Get actual image size so we can rescale results at end with reference to this
   image_width = orig_image_mat.cols;
   image_height = orig_image_mat.rows;
@@ -295,7 +293,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Mean all-channel Mean " << input_mean << " and mean all-channel StdDev " << input_std << std::endl;
 
 
-  // break into pieces if image is not square
+  // break into pieces if input image is not square
   std::vector<cv::Mat> sub_images;
   cv::Mat leftImage(image_height, image_height, CV_8UC3);
   cv::Mat rightImage(image_height, image_height, CV_8UC3);
@@ -311,7 +309,7 @@ int main(int argc, char *argv[]) {
     }
     // Setup a rectangle to define square sub-region on left side of image
     myROI = cv::Rect(0, 0, image_height, image_height);
-    std::cout << "Left " << myROI << std::endl;
+    //    std::cout << "Left " << myROI << std::endl;
 
     // Crop the full image to that image contained by the rectangle myROI
     // Note that this doesn't copy the data
@@ -319,7 +317,7 @@ int main(int argc, char *argv[]) {
     sub_images.push_back(leftImage);
     // Setup a rectangle to define square sub-region on right side of image
     myROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
-    std::cout << "Right " << myROI << std::endl;
+    //    std::cout << "Right " << myROI << std::endl;
     rightImage = orig_image_mat(myROI);
     sub_images.push_back(rightImage);
   } else { //only have one image to process and no recombining
@@ -331,11 +329,10 @@ int main(int argc, char *argv[]) {
   std::vector<Tensor> resized_tensors;
   cv::Mat new_mat;
   cv::resize(orig_image_mat, new_mat, cv::Size(input_width, input_height));
-  std::cout << "Subimages=" << sub_images.size() << std::endl;
   tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), input_height, input_width, input_channels}));
   auto input_tensor_mapped = input_tensor.tensor<float, 4>();
   for( auto sub_index = 0; sub_index < sub_images.size(); sub_index++) {
-//    std::cout << "Making tensor " << sub_index << std::endl;
+    std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
     for (int y = 0; y < new_mat.rows; y++) {
       for (int x = 0; x < new_mat.cols; x++) {
         cv::Vec3b pixel = new_mat.at<cv::Vec3b>(y, x);
@@ -347,8 +344,8 @@ int main(int argc, char *argv[]) {
   }
 
 
-  // Actually run the image through the model.
-  std::cout << "Run image in the model" << std::endl;
+  // Actually run the images through the model.
+  std::cout << "Running images in the model" << std::endl;
   std::vector<Tensor> outputs;
   Status run_status = session->Run({{input_layer, input_tensor}},
                                    {output_layer}, {}, &outputs);
@@ -356,13 +353,7 @@ int main(int argc, char *argv[]) {
     LOG(ERROR) << "Error: Running model failed: " << run_status;
     return -1;
   }
-  std::cout << "Finished with " << outputs.size() << " results" << std::endl;
-
-
-  // resize as percent of actual image dimensions
-  auto final_image_height = uint32(scale_percent * double(image_height) / 100);
-  auto final_image_width = uint32(scale_percent * double(image_width) / 100);
-  std::vector<Tensor> resized_outputs;
+  std::cout << "Finished running model with " << outputs.size() << " results" << std::endl;
   if ( outputs.size() != 1 ) {
     LOG(ERROR) << "Error: invalid number of outputs: " << outputs.size();
     return -1;
@@ -370,20 +361,28 @@ int main(int argc, char *argv[]) {
   auto const &output = outputs[0];
   output_classes = uint(output.shape().dim_size(3));
   std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
-  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
-
-  std::cout << "Resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
 
 
-  // resize original image to use for rgb colors here
+  // resize model output as percent of actual image dimensions
+  auto final_image_height = uint32(scale_percent * double(image_height) / 100);
+  auto final_image_width = uint32(scale_percent * double(image_width) / 100);
+  std::vector<Tensor> resized_outputs;  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
+  if (!resize_status.ok()) {
+    LOG(ERROR) << "Error: Resizing output from model failed: " << resize_status;
+    return -1;
+  }
+  std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
+  // resize original image to use for rgb colors (first three channels) in output tiff file
   cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
   if (scale_percent != 100) {
     cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
   } else {
     resized_mat = orig_image_mat;
   }
-  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
-  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
+  //  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
+  //  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
+  assert(resized_mat.cols == final_image_width);
+  assert(resized_mat.rows == final_image_height);
 
 
   // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
@@ -402,7 +401,7 @@ int main(int argc, char *argv[]) {
   std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
 
 
-  // prepare data for merging into output
+  // prepare output model data for merging into tiff output
   auto tensor_resized_output_map = (resized_outputs[0]).tensor<float, 4>();
   // get the underlying array
   auto resized_output_array = tensor_resized_output_map.data();
@@ -466,17 +465,17 @@ int main(int argc, char *argv[]) {
       for (int s = 3; s < output_channels; s++) {
         // set to segmentation here and blend between images
         int batch_image;
-        if ( blending_factor[j] == 0 ) {
+        if ( blending_factor[j] == 0 ) { // use first sub image
           batch_image = 0;
           segmentation_value =
               float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
                   + (i * final_image_width + j) * input_channels + s - 3];
-        } else if ( blending_factor[j] == 1 ) {
+        } else if ( blending_factor[j] == 1 ) { // use second sub image
           batch_image = 1;
           segmentation_value =
               float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
                   + (i * final_image_width + j) * input_channels + s - 3];
-        } else {
+        } else { // use both sub images in proportion using blending factor
           batch_image = 0;
           segmentation_value = (1 - blending_factor[j]) *
               float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
