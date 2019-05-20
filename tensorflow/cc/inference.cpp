@@ -1,78 +1,41 @@
 //
 // Created by David Hattery on 5/3/19.
+// Takes tensorflow model and images and returns image classification tiff image
+// with name as specified in input and which has first three channels as RGB
+// and appends one channel for each class in the model.
+// Also scales output tiff size according to optional input percentage.
 //
-
-
-// TODO determine if we can remove any of the following
-#include <fstream>
-#include <cstring>
-#include <utility>
-#include <vector>
-
-//#include "tensorflow/cc/ops/const_op.h"
-#include "tensorflow/cc/ops/standard_ops.h"
-#include "tensorflow/cc/ops/math_ops.h"
-
-#include "tensorflow/contrib/image/kernels/image_ops.h"
-
-//#include "tensorflow/core/lib/jpeg/jpeg_handle.h"
-//#include "tensorflow/core/lib/jpeg/jpeg_mem.h"
-//#include "tensorflow/core/lib/png/png_io.h"
-#include "tensorflow/core/framework/graph_def_util.h"
-#include "tensorflow/core/framework/tensor.h"
-//#include "tensorflow/core/framework/tensor_types.h"
-#include "tensorflow/core/framework/types.h"
-#include "tensorflow/core/framework/op.h"
-//#include "tensorflow/core/framework/dataset.h"
-#include "tensorflow/core/framework/node_def.pb.h"
-#include "tensorflow/core/framework/attr_value.pb.h"
-
-#include "tensorflow/tools/graph_transforms/file_utils.h"
-#include "tensorflow/tools/graph_transforms/transform_utils.h"
-
-#include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/lib/core/stringpiece.h"
-//#include "tensorflow/core/lib/core/threadpool.h"
-#include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/lib/io/path.h"
-
-#include "tensorflow/core/platform/init_main.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/types.h"
-
-#include "tensorflow/core/public/session.h"
-
-#include "tensorflow/core/util/command_line_flags.h"
-
-#include "tensorflow/cc/saved_model/loader.h"
-#include "tensorflow/cc/saved_model/tag_constants.h"
-
-#include "tensorflow/cc/client/client_session.h"
-
-//#define int64 opencv_broken_int
-//#define uint64 opencv_broken_uint
-//#define int32 opencv_broken_int
-// //#define float opencv_broken_float
-#include <opencv2/core/core.hpp>
-#include <opencv2/opencv.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
-//#include <opencv2/cv.hpp>
-#include <opencv2/highgui/highgui.hpp>
-//#include <opencv/cv.h>
-//#include <opencv/highgui.h>
-//#undef uint64
-//#undef int64
-//#undef int32
-// //#undef float
 
 #include <tiffio.h>
 #include <assert.h>
 #include <algorithm>
-//#ifndef NO_TIFF
-//#ifndef NO_OPENEXR
-//#include <half.h>
-//#endif
-//#endif
+#include <opencv2/core/core.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include "tensorflow/cc/ops/standard_ops.h"
+#include "tensorflow/cc/ops/math_ops.h"
+#include "tensorflow/cc/saved_model/loader.h"
+#include "tensorflow/cc/saved_model/tag_constants.h"
+#include "tensorflow/cc/client/client_session.h"
+#include "tensorflow/contrib/image/kernels/image_ops.h"
+#include "tensorflow/core/framework/graph_def_util.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/attr_value.pb.h"
+#include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/lib/io/path.h"
+#include "tensorflow/core/platform/init_main.h"
+#include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/public/session.h"
+#include "tensorflow/core/util/command_line_flags.h"
+#include "tensorflow/tools/graph_transforms/file_utils.h"
+#include "tensorflow/tools/graph_transforms/transform_utils.h"
 
 
 // These are all common classes it's handy to reference with no namespace.
@@ -85,99 +48,8 @@ using ::tensorflow::GraphDef;
 using ::tensorflow::Scope;
 using ::tensorflow::Session;
 using ::tensorflow::SessionOptions;
-//using namespace cv;
 
 namespace hive_segmentation {
-
-//static Status ReadEntireFile(Env *env, const string &filename,
-//                             Tensor *output) {
-//  uint64 file_size = 0;
-//  TF_RETURN_IF_ERROR(env->GetFileSize(filename, &file_size));
-//
-//  string contents;
-//  contents.resize(file_size);
-//
-//  std::unique_ptr<RandomAccessFile> file;
-//  TF_RETURN_IF_ERROR(env->NewRandomAccessFile(filename, &file));
-//
-//  StringPiece data;
-//  TF_RETURN_IF_ERROR(file->Read(0, file_size, &data, &(contents)[0]));
-//  if (data.size() != file_size) {
-//    return errors::DataLoss("Truncated read of '", filename, "' expected ", file_size, " got ", data.size());
-//  }
-//  output->scalar<string>()() = std::string(data);  //  .  .ToString();
-//  return Status::OK();
-//}
-
-//// Given an image file name, read in the data, try to decode it as an image,
-//// resize it to the requested size, and then scale the values as desired.
-//Status ReadTensorFromImageFile(const string &file_name, const int input_height,
-//                               const int input_width, const float input_mean,
-//                               const float input_std,
-//                               std::vector<Tensor> *out_tensors) {
-//  auto root = Scope::NewRootScope();
-//
-//  string input_name = "file_reader";
-//  string output_name = "normalized";
-//
-//  // read file_name into a tensor named input
-//  Tensor input(DT_STRING, TensorShape());
-//  TF_RETURN_IF_ERROR(ReadEntireFile(Env::Default(), file_name, &input));
-//
-//  // use a placeholder to read input data
-//  auto file_reader = tensorflow::ops::Placeholder(root.WithOpName("input"), DataType::DT_STRING);
-//
-//  std::vector<std::pair<string, Tensor>> inputs = {
-//      {"input", input},
-//  };
-//
-//  std::cout << "Figure out image type" << std::endl;
-//  // Now try to figure out what kind of file it is and decode it.
-//  const int wanted_channels = 3;
-//  Output image_reader;
-//  std::cout << "Loading image" << std::endl;
-//  if (str_util::EndsWith(file_name, ".png")) {
-//    image_reader = tensorflow::ops::DecodePng(root.WithOpName("png_reader"), file_reader,
-//                                              tensorflow::ops::DecodePng::Channels(wanted_channels));
-//  } else if (str_util::EndsWith(file_name, ".gif")) {
-//    // gif decoder returns 4-D tensor, remove the first dim
-//    image_reader = tensorflow::ops::Squeeze(root.WithOpName("squeeze_first_dim"),
-//                   tensorflow::ops::DecodeGif(root.WithOpName("gif_reader"), file_reader));
-//  } /*else if (str_util::EndsWith(file_name, ".bmp")) {
-//    image_reader = DecodeBmp(root.WithOpName("bmp_reader"), file_reader);
-//  }*/ else {
-//    // Assume if it's neither a PNG nor a GIF then it must be a JPEG.
-//    image_reader = tensorflow::ops::DecodeJpeg(root.WithOpName("jpeg_reader"), file_reader,
-//                                               tensorflow::ops::DecodeJpeg::Channels(wanted_channels));
-//  }
-//
-//  // TODO get image mean and std dev
-//
-//  std::cout << "Cast image to float" << std::endl;
-//  // Now cast the image data to float so we can do normal math on it.
-//  auto float_caster = tensorflow::ops::Cast(root.WithOpName("float_caster"), image_reader, DT_FLOAT);
-//
-//  // The convention for image ops in TensorFlow is that all images are expected
-//  // to be in batches, so that they're four-dimensional arrays with indices of
-//  // [batch, height, width, channel]. Because we only have a single image, we
-//  // have to add a batch dimension of 1 to the start with ExpandDims().
-//  auto dims_expander = tensorflow::ops::ExpandDims(root, float_caster, 0);
-//  // Bilinearly resize the image to fit the required dimensions.
-//  auto resized = tensorflow::ops::ResizeBilinear(root, dims_expander,
-//      tensorflow::ops::Const(root.WithOpName("size"), {input_height, input_width}));
-//  tensorflow::ops::Div(root.WithOpName(output_name), tensorflow::ops::Sub(root, resized, {input_mean}), {input_std});
-//
-//  // This runs the GraphDef network definition that we've just constructed, and
-//  // returns the results in the output tensor.
-//  GraphDef graph;
-//  TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
-//
-//  std::unique_ptr<Session> session(
-//      NewSession(SessionOptions()));
-//  TF_RETURN_IF_ERROR(session->Create(graph));
-//  TF_RETURN_IF_ERROR(session->Run({inputs}, {output_name}, {}, out_tensors));
-//  return Status::OK();
-//}
 
 Status ResizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, const int output_height, const int output_width){
   auto root = Scope::NewRootScope();
@@ -339,7 +211,6 @@ int main(int argc, char *argv[]) {
   string image_filename = "2016-tesla-model-s-17-of-43.jpg";
   string image_result_filename = "2016-tesla-model-s-17-of-43.tif";
   string graph = "my_model.pb";
-//  string graph = "saved_model.pb";
   int image_width = 512;
   int image_height = 512;
   int32 input_width = 512;
@@ -351,21 +222,14 @@ int main(int argc, char *argv[]) {
   string input_layer = "input_3";
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
-//  bool self_test = false;
-  string root_dir = "/home/david/test_output";
+  string root_dir = "./";
   // Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
-      Flag("image", &image_filename, "full path image to be processed"),
-      Flag("results", &image_result_filename, "full path processed image results"),
-      Flag("scale", &scale_percent, "percent to scale output results"),
-      Flag("graph", &graph, "graph to be executed"),
-      Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
-      // These are now done automatically or no longer used
-//      Flag("input_width", &input_width, "resize image to this width in pixels"),
-//      Flag("input_height", &input_height, "resize image to this height in pixels"),
-//      Flag("input_layer", &input_layer, "name of input layer"),
-//      Flag("output_layer", &output_layer, "name of output layer"),
-//      Flag("self_test", &self_test, "run a self test"),
+    Flag("image", &image_filename, "full path image to be processed"),
+    Flag("results", &image_result_filename, "full path processed image results"),
+    Flag("scale", &scale_percent, "percent to scale output results"),
+    Flag("graph", &graph, "graph to be executed"),
+    Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -374,30 +238,23 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
+
   // We need to call this to set up global state for TensorFlow.
   tensorflow::port::InitMain(argv[0], &argc, &argv);
   if (argc > 1) {
-    LOG(ERROR) << "Unknown argument " << argv[1] << "\n" << usage;
+    LOG(ERROR) << "Error: Unknown argument " << argv[1] << "\n" << usage;
     return -1;
   }
 
+
   // First we load and initialize the model.
   std::unique_ptr<tensorflow::Session> session;
-
   // TODO use gpu for session if available
   std::cout << "Set up session" << std::endl;
-////  const string export_dir = tensorflow::io::JoinPath(tensorflow::testing::TensorFlowSrcRoot(), kTestDataSharded);
-//  const string export_dir = "/home/david/test_output/";  //SavedModel.pb";
-//  tensorflow::SavedModelBundle bundle;
-//  tensorflow::SessionOptions session_options;
-//  tensorflow::RunOptions run_options;
-//  auto load_graph_status = tensorflow::LoadSavedModel(session_options, run_options, export_dir, {tensorflow::kSavedModelTagServe}, &bundle);
-////  tensorflow::LoadSavedModel(session_options, run_options, export_dir, {kSavedModelTagServe}, &bundle);
-
   string graph_path = tensorflow::io::JoinPath(root_dir, graph);
   Status load_graph_status = ::hive_segmentation::LoadGraph(graph_path, &session, input_layer, output_layer, &input_batch_size, &input_width, &input_height, &input_channels);
   if (!load_graph_status.ok()) {
-    LOG(ERROR) << load_graph_status;
+    LOG(ERROR) << "Error: " << load_graph_status;
     return -1;
   }
   std::cout << "Model Input: " << input_layer << std::endl;
@@ -405,27 +262,17 @@ int main(int argc, char *argv[]) {
   std::cout << "Model x: " << input_width << std::endl;
   std::cout << "Model y: " << input_height << std::endl;
   std::cout << "Model c: " << input_channels << std::endl;
-//  std::cout << "Model batch: " << input_batch_size << std::endl;
 
 
   // TODO repeat this for all images in scene
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
   std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
-  // Load image using opencv so that we can preprocess it easily
-//  string image_path = tensorflow::io::JoinPath(root_dir, image_filename);
-//  ::cv::Mat orig_image_mat;
-//  orig_image_mat = ::cv::imread(image_path, CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file
-//  if(! orig_image_mat.data )                              // Check for invalid input
-//  {
-//    std::cerr <<  "Could not open or find the image " << image_path << std::endl ;
-//    return -1;
-//  }
   ::cv::Mat orig_image_mat;
   orig_image_mat = ::cv::imread(image_filename, CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file
   if(! orig_image_mat.data )                              // Check for invalid input
   {
-    std::cerr <<  "Could not open or find the image " << image_filename << std::endl ;
+    LOG(ERROR) <<  "Error: Could not open or find the image" << image_filename;
     return -1;
   }
 
@@ -433,8 +280,7 @@ int main(int argc, char *argv[]) {
   // Get actual image size so we can rescale results at end with reference to this
   image_width = orig_image_mat.cols;
   image_height = orig_image_mat.rows;
-  std::cout << "Image x width " << image_width << std::endl;
-  std::cout << "Image y height " << image_height << std::endl;
+  std::cout << "Image x width " << image_width << " and y height " << image_height << std::endl;
   // Get image mean and stddev for tensorflow normalization
   cv::Scalar mean, stddev;
   cv::meanStdDev(orig_image_mat, mean, stddev);
@@ -450,19 +296,25 @@ int main(int argc, char *argv[]) {
 
 
   // break into pieces if image is not square
-  // TODO what if image height is greater than width
-  // TODO what is the aspect ratio is too big and there is a gap between images
   std::vector<cv::Mat> sub_images;
   cv::Mat leftImage(image_height, image_height, CV_8UC3);
   cv::Mat rightImage(image_height, image_height, CV_8UC3);
   cv::Rect myROI;
+  if ( image_height > image_width ) {
+    LOG(ERROR) << "Error: Image height is greater than image width";
+    return -1;
+  }
   if(image_width != image_height) {
-  // Setup a rectangle to define square sub-region on left side of image
+    if ( image_width > ( 2 * image_height )){
+      LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
+      return -1;
+    }
+    // Setup a rectangle to define square sub-region on left side of image
     myROI = cv::Rect(0, 0, image_height, image_height);
     std::cout << "Left " << myROI << std::endl;
 
-// Crop the full image to that image contained by the rectangle myROI
-// Note that this doesn't copy the data
+    // Crop the full image to that image contained by the rectangle myROI
+    // Note that this doesn't copy the data
     leftImage = orig_image_mat(myROI);
     sub_images.push_back(leftImage);
     // Setup a rectangle to define square sub-region on right side of image
@@ -483,7 +335,7 @@ int main(int argc, char *argv[]) {
   tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), input_height, input_width, input_channels}));
   auto input_tensor_mapped = input_tensor.tensor<float, 4>();
   for( auto sub_index = 0; sub_index < sub_images.size(); sub_index++) {
-    std::cout << "Making tensor " << sub_index << std::endl;
+//    std::cout << "Making tensor " << sub_index << std::endl;
     for (int y = 0; y < new_mat.rows; y++) {
       for (int x = 0; x < new_mat.cols; x++) {
         cv::Vec3b pixel = new_mat.at<cv::Vec3b>(y, x);
@@ -501,7 +353,7 @@ int main(int argc, char *argv[]) {
   Status run_status = session->Run({{input_layer, input_tensor}},
                                    {output_layer}, {}, &outputs);
   if (!run_status.ok()) {
-    LOG(ERROR) << "Running model failed: " << run_status;
+    LOG(ERROR) << "Error: Running model failed: " << run_status;
     return -1;
   }
   std::cout << "Finished with " << outputs.size() << " results" << std::endl;
@@ -510,57 +362,52 @@ int main(int argc, char *argv[]) {
   // resize as percent of actual image dimensions
   auto final_image_height = uint32(scale_percent * double(image_height) / 100);
   auto final_image_width = uint32(scale_percent * double(image_width) / 100);
-  // TODO test
-//  final_image_width = final_image_height;
   std::vector<Tensor> resized_outputs;
   if ( outputs.size() != 1 ) {
-    std::cout << "Error: invalid number of outputs: " << outputs.size() << std::endl;
+    LOG(ERROR) << "Error: invalid number of outputs: " << outputs.size();
     return -1;
   }
   auto const &output = outputs[0];
   output_classes = uint(output.shape().dim_size(3));
-  std::cout << "Output shape " << output.shape() << " and dims " << output.shape().dims() << " classes " << output_classes << std::endl;
+  std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
   Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
 
   std::cout << "Resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
 
 
-// resize original image to use for rgb colors here
+  // resize original image to use for rgb colors here
   cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
   if (scale_percent != 100) {
     cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
   } else {
     resized_mat = orig_image_mat;
   }
-  std::cout << "Resized Image x width " << resized_mat.cols << std::endl;
-  std::cout << "Resized Image y height " << resized_mat.rows << std::endl;
+  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
+  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
 
 
-// normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
+  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
   float min_class, max_class;
   Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
   if (!min_status.ok()) {
-    LOG(ERROR) << "Getting min_class for normalization failed: " << min_status;
+    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << min_status;
     return -1;
   }
   Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
   if (!max_status.ok()) {
-    LOG(ERROR) << "Getting max_class for normalization failed: " << max_status;
+    LOG(ERROR) << "Error: Getting max_class for normalization failed: " << max_status;
     return -1;
   }
   auto range_class = max_class - min_class;
   std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
 
 
-  // TODO make this output class/method
+  // prepare data for merging into output
   auto tensor_resized_output_map = (resized_outputs[0]).tensor<float, 4>();
   // get the underlying array
   auto resized_output_array = tensor_resized_output_map.data();
   auto *float_resized_output_array = static_cast<float*>(resized_output_array);
-//  void* output_data = tensorflow::TF_TensorData(resized_outputs[0]);
-//  assert(TF_GetCode(s) == TF_OK);
-
-// Make blending array for combining multiple class segmentations
+  // Make blending array for combining multiple class segmentations
   float blending_factor[final_image_width];
   int overlap = (2 * final_image_height) - final_image_width;
   int offset = final_image_width - final_image_height;
@@ -579,11 +426,10 @@ int main(int argc, char *argv[]) {
     }
   }
 
+
+  // merge and save data into tiff file
   auto output_channels = output_classes + input_channels;
   std::cout << "Building TIFF of size " << final_image_width << " X " << final_image_height << " X " << output_channels << std::endl;
-//  std::string tiff_filename = image_path.substr(0,image_path.find_last_of('.'))+"_segmentation.tif";
-//  std::cout << "Saving Tiff to " << tiff_filename << std::endl;
-//  TIFF *tif = TIFFOpen(tiff_filename.c_str(), "w");
   std::cout << "Saving Tiff to " << image_result_filename << std::endl;
   TIFF *tif = TIFFOpen(image_result_filename.c_str(), "w");
   TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, final_image_width);
@@ -592,20 +438,19 @@ int main(int argc, char *argv[]) {
   TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
   TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
   TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-//  TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_SEPARATE);
-//  TIFFSetField(tif, TIFFTAG_XRESOLUTION, 1.0);
-//  TIFFSetField(tif, TIFFTAG_YRESOLUTION, 1.0);
-//  TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, 1);
+  //  TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_SEPARATE);
+  //  TIFFSetField(tif, TIFFTAG_XRESOLUTION, 1.0);
+  //  TIFFSetField(tif, TIFFTAG_YRESOLUTION, 1.0);
+  //  TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, 1);
   TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
   TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
   TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK);
-//  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, 0);
-//  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+  //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, 0);
+  //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
   TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width));
-//  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width * output_channels));
+  //  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width * output_channels));
 
   uint8_t arr[final_image_width * output_channels];
-//  float scale_pixel[3] = {255.f, 255.f, 255.f};
   for (auto i = 0; i < final_image_height; i++)  {//test with square
     float scale_pixel[3] = {1.f, 1.f, 1.f};
     cv::Vec3b pixel_value;
@@ -646,7 +491,7 @@ int main(int argc, char *argv[]) {
         segmentation_value /= range_class;
         assert(segmentation_value >= 0);
         assert(segmentation_value <= 1.f);
-        // scale to pixel value
+        // scale to 8 bit pixel value
         segmentation_value *= 255.f;
 //        std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
         arr[j*output_channels + s] = uint8_t(segmentation_value);
@@ -654,8 +499,8 @@ int main(int argc, char *argv[]) {
     }
     TIFFWriteScanline(tif, &arr, i, 0);
   }
-
   TIFFClose(tif);
+
 
   std::cout << "Done" << std::endl;
   return 0;
