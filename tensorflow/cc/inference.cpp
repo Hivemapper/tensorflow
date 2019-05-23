@@ -60,6 +60,59 @@ Status ResizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, c
   return Status::OK();
 }
 
+Status NormalizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, const int output_height, const int output_width) { //, const float input_mean, const float input_std){
+  auto root = Scope::NewRootScope();
+  auto input_tensor = tensorflow::ops::Const(root, in_tensor);
+  auto resized = tensorflow::ops::ResizeBilinear(root.WithOpName("resized"), input_tensor, {output_height, output_width});
+  auto mean = tensorflow::ops::Mean(root.WithOpName("mean"), resized, {0,1,2,3});
+  auto mean2 = tensorflow::ops::Mean(root.WithOpName("mean2"), tensorflow::ops::Square(root.WithOpName("square"), resized), {0,1,2,3});
+  auto var = tensorflow::ops::Sub(root.WithOpName("var"), mean2, tensorflow::ops::Square(root, mean));
+  auto std = tensorflow::ops::Sqrt(root.WithOpName("std"), var);
+  // need a min value for std = 1/sqrt(num_pixels)
+  // TODO test if this is number of pixels or colors * pixels
+  // alternative is something like num_pixels = math_ops.reduce_prod(array_ops.shape(image)[-3:])
+  auto num_pixels = tensorflow::ops::Cast(root.WithOpName("num_pixels"), tensorflow::ops::Size(root, resized), tensorflow::DT_FLOAT);
+  auto min_std = tensorflow::ops::Rsqrt(root.WithOpName("min_std"),  num_pixels);
+  auto adj_std = tensorflow::ops::Maximum(root.WithOpName("adj_std"), std, min_std);
+  auto normalized = tensorflow::ops::Div(root.WithOpName("normalized"), tensorflow::ops::Sub(root, resized, mean), adj_std);
+  tensorflow::ClientSession session(root);
+  TF_RETURN_IF_ERROR(session.Run({normalized}, out_tensors));
+  return Status::OK();
+}
+
+Status MeanTensor(const Tensor &in_tensor, float &output_mean){
+  auto root = Scope::NewRootScope();
+  std::vector<Tensor> mean_tensors;
+  auto input_tensor = tensorflow::ops::Const(root, in_tensor);
+  auto mean = tensorflow::ops::Mean(root.WithOpName("mean"), input_tensor, {0,1,2,3});
+  tensorflow::ClientSession session(root);
+  TF_RETURN_IF_ERROR(session.Run({mean}, &mean_tensors));
+  auto mean_vals = mean_tensors[0].flat_inner_dims<float>();
+//  min_class = *std::min_element(min_class_vals.data(), min_class_vals.data() + output_classes);
+  std::cout << "Mean debug " << mean_tensors[0].DebugString() << std::endl;
+//  std::cout << "Mat mins " << min_class_vals << std::endl;
+  output_mean = mean_vals.data()[0];
+  std::cout << "The mean " << output_mean << std::endl;
+  return Status::OK();
+}
+
+Status StdTensor(const Tensor &in_tensor, float input_mean, float &output_std){
+  auto root = Scope::NewRootScope();
+  std::vector<Tensor> std_tensors;
+  auto input_tensor = tensorflow::ops::Const(root, in_tensor);
+  auto mean2 = tensorflow::ops::Mean(root.WithOpName("mean"), tensorflow::ops::Square(root.WithOpName("square"), input_tensor), {0,1,2,3});
+  tensorflow::ClientSession session(root);
+  TF_RETURN_IF_ERROR(session.Run({mean2}, &std_tensors));
+  auto std_vals = std_tensors[0].flat_inner_dims<float>();
+//  min_class = *std::min_element(min_class_vals.data(), min_class_vals.data() + output_classes);
+//  std::cout << "mean2 debug " << std_tensors[0].DebugString() << std::endl;
+//  std::cout << "mean2 " << std_vals << std::endl;
+//  std::cout << "The mins " << min_class << std::endl;
+  output_std = sqrt(std_vals.data()[0] - (input_mean * input_mean));
+  std::cout << "The std " << output_std << std::endl;
+  return Status::OK();
+}
+
 Status MinTensor(const Tensor &in_tensor, int output_classes, float &min_class){
   auto root = Scope::NewRootScope();
   std::vector<Tensor> min_tensors;
@@ -83,10 +136,10 @@ Status MaxTensor(const Tensor &in_tensor, int output_classes, float &max_class){
   tensorflow::ClientSession session(root);
   TF_RETURN_IF_ERROR(session.Run({max}, &max_tensors));
   auto max_class_vals = max_tensors[0].flat_inner_dims<float>();
-  max_class = *std::min_element(max_class_vals.data(), max_class_vals.data() + output_classes);
-//  std::cout << "Mat mins debug " << max_tensors[0].DebugString() << std::endl;
-//  std::cout << "Mat mins " << max_class_vals << std::endl;
-//  std::cout << "The mins " << max_class << std::endl;
+  max_class = *std::max_element(max_class_vals.data(), max_class_vals.data() + output_classes);
+//  std::cout << "Mat maxs debug " << max_tensors[0].DebugString() << std::endl;
+//  std::cout << "Mat maxs " << max_class_vals << std::endl;
+//  std::cout << "The maxs " << max_class << std::endl;
   return Status::OK();
 }
 
@@ -215,10 +268,11 @@ int main(int argc, char *argv[]) {
   int image_height = 512;
   int32 input_width = 512;
   int32 input_height = 512;
+  double input_aspect_ratio = 1.0;
   int32 input_channels = 3;
   int32 input_batch_size = 1;
-  double input_mean = 0;
-  double input_std = 255;
+//  double input_mean = 0;
+//  double input_std = 255;
   string input_layer = "input_3";
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
@@ -257,11 +311,13 @@ int main(int argc, char *argv[]) {
     LOG(ERROR) << "Error: " << load_graph_status;
     return -1;
   }
+  input_aspect_ratio = double(input_height) / double(input_width);
   std::cout << "Model Input: " << input_layer << std::endl;
   std::cout << "Model Output: " << output_layer << std::endl;
   std::cout << "Model x: " << input_width << std::endl;
   std::cout << "Model y: " << input_height << std::endl;
-  std::cout << "Model c: " << input_channels << std::endl;
+  std::cout << "Model aspect ratio: " << input_aspect_ratio << std::endl;
+  std::cout << "Model colors: " << input_channels << std::endl;
 
 
   // TODO repeat the following for all images in scene
@@ -269,7 +325,9 @@ int main(int argc, char *argv[]) {
   // to the specifications the main graph expects.
   std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
   ::cv::Mat orig_image_mat;
-  orig_image_mat = ::cv::imread(image_filename, CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file
+  // note natural imread uses BGR color order so want to use RGB instead
+  orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);// CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file as RGB
+//  orig_image_mat = ::cv::imread(image_filename, cv::IMREAD_COLOR);   // Read the file as BGR
   if(! orig_image_mat.data )                              // Check for invalid input
   {
     LOG(ERROR) <<  "Error: Could not open or find the image" << image_filename;
@@ -279,75 +337,122 @@ int main(int argc, char *argv[]) {
   image_width = orig_image_mat.cols;
   image_height = orig_image_mat.rows;
   std::cout << "Image x width " << image_width << " and y height " << image_height << std::endl;
-  // Get image mean and stddev for tensorflow normalization
-  cv::Scalar mean, stddev;
-  cv::meanStdDev(orig_image_mat, mean, stddev);
-  input_mean = 0;
-  input_std = 0;
-  for (int i=0; i<input_channels; i++){
-    input_mean += mean[i];
-    input_std += stddev[i];
-  }
-  input_mean /= input_channels;
-  input_std /= input_channels;
-  std::cout << "Mean all-channel Mean " << input_mean << " and mean all-channel StdDev " << input_std << std::endl;
+//  // Get image mean and stddev for tensorflow normalization
+//  cv::Scalar mean, stddev;
+//  cv::meanStdDev(orig_image_mat, mean, stddev);
+//  input_mean = 0;
+//  double raw_input_std = 0;
+//  for (int i=0; i<input_channels; i++){
+//    input_mean += mean[i];
+//    raw_input_std += stddev[i];
+//  }
+//  input_mean /= input_channels;
+//  raw_input_std /= input_channels;
+//  input_std = std::max(raw_input_std, 1/sqrt(image_width * image_height));
+////  input_std = 255; // TODO testing
+//  std::cout << "Mean all-channel Mean " << input_mean << " and mean all-channel StdDev " << input_std << std::endl;
 
 
   // break into pieces if input image is not square
   std::vector<cv::Mat> sub_images;
+  std::vector<cv::Rect> rectangles;
   cv::Mat leftImage(image_height, image_height, CV_8UC3);
   cv::Mat rightImage(image_height, image_height, CV_8UC3);
-  cv::Rect myROI;
-  if ( image_height > image_width ) {
-    LOG(ERROR) << "Error: Image height is greater than image width";
+  cv::Rect leftROI, rightROI;
+  if ( double(image_height) > double(image_width) * input_aspect_ratio ) {
+    LOG(ERROR) << "Error: Image height is proportionally greater than image width";
     return -1;
   }
-  if(image_width != image_height) {
-    if ( image_width > ( 2 * image_height )){
+  if( double(image_height) != double(image_width) * input_aspect_ratio ) {
+//    (image_width * input_height) != (image_height * input_width) ) {
+    if ( double(image_width) * input_aspect_ratio > double( 2 * image_height )){
       LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
       return -1;
     }
+    // TODO fix the following for non-square input
     // Setup a rectangle to define square sub-region on left side of image
-    myROI = cv::Rect(0, 0, image_height, image_height);
-    //    std::cout << "Left " << myROI << std::endl;
-
+    leftROI = cv::Rect(0, 0, image_height, image_height);
+    //    std::cout << "Left " << leftROI << std::endl;
     // Crop the full image to that image contained by the rectangle myROI
     // Note that this doesn't copy the data
-    leftImage = orig_image_mat(myROI);
+    leftImage = orig_image_mat(leftROI);
     sub_images.push_back(leftImage);
+    rectangles.push_back(leftROI);
+
     // Setup a rectangle to define square sub-region on right side of image
-    myROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
-    //    std::cout << "Right " << myROI << std::endl;
-    rightImage = orig_image_mat(myROI);
+    rightROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
+    //    std::cout << "Right " << rightROI << std::endl;
+    rightImage = orig_image_mat(rightROI);
     sub_images.push_back(rightImage);
+    rectangles.push_back(rightROI);
   } else { //only have one image to process and no recombining
     sub_images.push_back(orig_image_mat);
+    rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
   }
 
 
   // create tensorflow tensor directly from in-memory opencv mat
-  std::vector<Tensor> resized_tensors;
-  cv::Mat new_mat;
-  cv::resize(orig_image_mat, new_mat, cv::Size(input_width, input_height));
-  tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), input_height, input_width, input_channels}));
+  tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), image_height, image_height, input_channels}));
   auto input_tensor_mapped = input_tensor.tensor<float, 4>();
   for( auto sub_index = 0; sub_index < sub_images.size(); sub_index++) {
     std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
-    for (int y = 0; y < new_mat.rows; y++) {
-      for (int x = 0; x < new_mat.cols; x++) {
-        cv::Vec3b pixel = new_mat.at<cv::Vec3b>(y, x);
+//    std::cout << "Rows " << sub_images[sub_index].rows << " and cols " << sub_images[sub_index].cols << std::endl;
+    for (int y = 0; y < sub_images[sub_index].rows; y++) {
+      for (int x = 0; x < sub_images[sub_index].cols; x++) {
+        cv::Vec3b pixel = sub_images[sub_index].at<cv::Vec3b>(y, x);
+        // tensorflow reads files as BGR, so need to order/reorder data that way
+//        std::cout << "Pixel " << x << " " << y << " is " << pixel << std::endl;
         input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //R
         input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
         input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //B
+//        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[0]; //R
+//        input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
+//        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[2]; //B
       }
     }
   }
 
 
+//  // TODO testing resize and normalize input by mean and std
+//  std::vector<Tensor> tresized_normal_tensors;
+//  Status tresized_normalize_status = ::hive_segmentation::ResizeTensor(input_tensor, &tresized_normal_tensors, input_height, input_width);
+//  if (!tresized_normalize_status.ok()) {
+//    LOG(ERROR) << "Error: Test Input tensor normalization failed: " << tresized_normalize_status;
+//    return -1;
+//  }
+//  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
+//  float tmean, tstd;
+//  Status tmean_status = ::hive_segmentation::MeanTensor(tresized_normal_tensors[0], tmean);
+//  if (!tmean_status.ok()) {
+//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << tmean_status;
+//    return -1;
+//  }
+//  Status tstd_status = ::hive_segmentation::StdTensor(tresized_normal_tensors[0], tmean, tstd);
+//  if (!tstd_status.ok()) {
+//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << tstd_status;
+//    return -1;
+//  }
+
+
+
+  // resize and normalize input by mean and std
+  std::cout << "Resizing and Normalizing input tensor" << std::endl;
+  std::vector<Tensor> resized_normal_tensors;
+  Status resized_normalize_status = ::hive_segmentation::NormalizeTensor(input_tensor, &resized_normal_tensors, input_height, input_width); //, input_mean, input_std);
+  if (!resized_normalize_status.ok()) {
+    LOG(ERROR) << "Error: Input tensor normalization failed: " << resized_normalize_status;
+    return -1;
+  }
+
+  // TODO testing
+  float tmean, tstd;
+  Status tmean_status = ::hive_segmentation::MeanTensor(resized_normal_tensors[0], tmean);
+  Status tstd_status = ::hive_segmentation::StdTensor(resized_normal_tensors[0], tmean, tstd);
+
   // Actually run the images through the model.
   std::cout << "Running images in the model" << std::endl;
   std::vector<Tensor> outputs;
-  Status run_status = session->Run({{input_layer, input_tensor}},
+  Status run_status = session->Run({{input_layer, resized_normal_tensors[0]}},
                                    {output_layer}, {}, &outputs);
   if (!run_status.ok()) {
     LOG(ERROR) << "Error: Running model failed: " << run_status;
@@ -366,7 +471,8 @@ int main(int argc, char *argv[]) {
   // resize model output as percent of actual image dimensions
   auto final_image_height = uint32(scale_percent * double(image_height) / 100);
   auto final_image_width = uint32(scale_percent * double(image_width) / 100);
-  std::vector<Tensor> resized_outputs;  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
+  std::vector<Tensor> resized_outputs;
+  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
   if (!resize_status.ok()) {
     LOG(ERROR) << "Error: Resizing output from model failed: " << resize_status;
     return -1;
@@ -374,11 +480,11 @@ int main(int argc, char *argv[]) {
   std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
   // resize original image to use for rgb colors (first three channels) in output tiff file
   cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
-  if (scale_percent != 100) {
+//  if (scale_percent != 100) {
     cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
-  } else {
-    resized_mat = orig_image_mat;
-  }
+//  } else {
+//    resized_mat = orig_image_mat;
+//  }
   //  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
   //  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
   assert(resized_mat.cols == final_image_width);
@@ -402,9 +508,9 @@ int main(int argc, char *argv[]) {
 
 
   // prepare output model data for merging into tiff output
-  auto tensor_resized_output_map = (resized_outputs[0]).tensor<float, 4>();
-  // get the underlying array
-  auto resized_output_array = tensor_resized_output_map.data();
+  // TODO use rectangles data here rather than hard coding with offset and overlap
+  // setup for getting the underlying array back from the tensor
+  auto resized_output_array = resized_outputs[0].flat<float>().data();
   auto *float_resized_output_array = static_cast<float*>(resized_output_array);
   // Make blending array for combining multiple class segmentations
   float blending_factor[final_image_width];
@@ -446,7 +552,8 @@ int main(int argc, char *argv[]) {
   TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK);
   //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, 0);
   //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width));
+  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_height));
+  TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0x0);
   //  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width * output_channels));
 
   uint8_t arr[final_image_width * output_channels];
@@ -458,7 +565,8 @@ int main(int argc, char *argv[]) {
       pixel_value = resized_mat.at<cv::Vec3b>(i, j);
       for (auto k = 0; k < 3; k++) {
         // set to rgb colors here
-        auto scaled_pixel = uint8_t(scale_pixel[k] * float(pixel_value.val[k]));
+        // TODO check colors--do we need BGR for our program to extract right colors??
+        auto scaled_pixel = uint8_t(scale_pixel[k] * float(pixel_value.val[2-k]));
 //        std::cout << "i " << i << " j " << j << " val " << uint(scaled_pixel) << std::endl;
         arr[j*output_channels + k] = scaled_pixel;
       }
@@ -468,27 +576,27 @@ int main(int argc, char *argv[]) {
         if ( blending_factor[j] == 0 ) { // use first sub image
           batch_image = 0;
           segmentation_value =
-              float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
-                  + (i * final_image_width + j) * input_channels + s - 3];
+              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                  + (i * final_image_height + j) * output_classes + s - 3];
         } else if ( blending_factor[j] == 1 ) { // use second sub image
           batch_image = 1;
           segmentation_value =
-              float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
-                  + (i * final_image_width + j) * input_channels + s - 3];
+              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                  + (i * final_image_height + (j - offset)) * output_classes + s - 3];
         } else { // use both sub images in proportion using blending factor
           batch_image = 0;
           segmentation_value = (1 - blending_factor[j]) *
-              float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
-                  + (i * final_image_width + j) * input_channels + s - 3];
+              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                  + (i * final_image_height + j) * output_classes + s - 3];
           batch_image = 1;
           segmentation_value += blending_factor[j] *
-              float_resized_output_array[(batch_image * final_image_height * final_image_width * input_channels)
-                  + (i * final_image_width + j) * input_channels + s - 3];
+              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                  + (i * final_image_height + (j - offset)) * output_classes + s - 3];
         }
-        // normalize it
+        // normalize it to global class values on a scale of 0-1
         segmentation_value -= min_class;
         segmentation_value /= range_class;
-        assert(segmentation_value >= 0);
+        assert(segmentation_value >= 0.f);
         assert(segmentation_value <= 1.f);
         // scale to 8 bit pixel value
         segmentation_value *= 255.f;
