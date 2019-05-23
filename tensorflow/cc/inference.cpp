@@ -51,16 +51,20 @@ using ::tensorflow::SessionOptions;
 
 namespace hive_segmentation {
 
+// This method just resizes a tensors with bicubic interpolation on each class/channel
 Status ResizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, const int output_height, const int output_width){
   auto root = Scope::NewRootScope();
   auto input_tensor = tensorflow::ops::Const(root, in_tensor);
-  auto resized = tensorflow::ops::ResizeBilinear(root.WithOpName("resized"), input_tensor, {output_height, output_width});
+//  auto resized = tensorflow::ops::ResizeBilinear(root.WithOpName("resized"), input_tensor, {output_height, output_width});
+  auto resized = tensorflow::ops::ResizeBicubic(root.WithOpName("resized"), input_tensor, {output_height, output_width});
   tensorflow::ClientSession session(root);
   TF_RETURN_IF_ERROR(session.Run({resized}, out_tensors));
   return Status::OK();
 }
 
-Status NormalizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, const int output_height, const int output_width) { //, const float input_mean, const float input_std){
+// This method is like the per_image_standardization available in python tensorflow.
+// It resizes the input and subtracts the global mean and divides by the global standard deviation.
+Status NormalizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors, const int output_height, const int output_width) {
   auto root = Scope::NewRootScope();
   auto input_tensor = tensorflow::ops::Const(root, in_tensor);
   auto resized = tensorflow::ops::ResizeBilinear(root.WithOpName("resized"), input_tensor, {output_height, output_width});
@@ -70,7 +74,7 @@ Status NormalizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors
   auto std = tensorflow::ops::Sqrt(root.WithOpName("std"), var);
   // need a min value for std = 1/sqrt(num_pixels)
   // TODO test if this is number of pixels or colors * pixels
-  // alternative is something like num_pixels = math_ops.reduce_prod(array_ops.shape(image)[-3:])
+  // alternative is something like the python call: num_pixels = math_ops.reduce_prod(array_ops.shape(image)[-3:])
   auto num_pixels = tensorflow::ops::Cast(root.WithOpName("num_pixels"), tensorflow::ops::Size(root, resized), tensorflow::DT_FLOAT);
   auto min_std = tensorflow::ops::Rsqrt(root.WithOpName("min_std"),  num_pixels);
   auto adj_std = tensorflow::ops::Maximum(root.WithOpName("adj_std"), std, min_std);
@@ -88,11 +92,10 @@ Status MeanTensor(const Tensor &in_tensor, float &output_mean){
   tensorflow::ClientSession session(root);
   TF_RETURN_IF_ERROR(session.Run({mean}, &mean_tensors));
   auto mean_vals = mean_tensors[0].flat_inner_dims<float>();
-//  min_class = *std::min_element(min_class_vals.data(), min_class_vals.data() + output_classes);
-  std::cout << "Mean debug " << mean_tensors[0].DebugString() << std::endl;
+//  std::cout << "Mean debug " << mean_tensors[0].DebugString() << std::endl;
 //  std::cout << "Mat mins " << min_class_vals << std::endl;
   output_mean = mean_vals.data()[0];
-  std::cout << "The mean " << output_mean << std::endl;
+//  std::cout << "The mean " << output_mean << std::endl;
   return Status::OK();
 }
 
@@ -104,12 +107,11 @@ Status StdTensor(const Tensor &in_tensor, float input_mean, float &output_std){
   tensorflow::ClientSession session(root);
   TF_RETURN_IF_ERROR(session.Run({mean2}, &std_tensors));
   auto std_vals = std_tensors[0].flat_inner_dims<float>();
-//  min_class = *std::min_element(min_class_vals.data(), min_class_vals.data() + output_classes);
 //  std::cout << "mean2 debug " << std_tensors[0].DebugString() << std::endl;
 //  std::cout << "mean2 " << std_vals << std::endl;
 //  std::cout << "The mins " << min_class << std::endl;
   output_std = sqrt(std_vals.data()[0] - (input_mean * input_mean));
-  std::cout << "The std " << output_std << std::endl;
+//  std::cout << "The std " << output_std << std::endl;
   return Status::OK();
 }
 
@@ -143,9 +145,10 @@ Status MaxTensor(const Tensor &in_tensor, int output_classes, float &max_class){
   return Status::OK();
 }
 
+// parses a graph and gets the names of input and output layers, as well as input tensor dimensions
+// that can be used to resize input images for processing in the model
 Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output_layer,
                   int32 *input_batch_size, int32 *input_width, int32 *input_height, int32 *input_channels){
-//  int32 input_channels = 0;
   std::vector<const tensorflow::NodeDef*> placeholders;
   std::vector<const tensorflow::NodeDef*> variables;
   for (const tensorflow::NodeDef& node : graph_def->node()) {
@@ -229,8 +232,7 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
   return Status::OK();
 }
 
-// Reads a model graph definition from disk, and creates a session object you
-// can use to run it.
+// Reads a model graph definition from disk, and creates a session object
 Status LoadGraph(const string &graph_file_name,
                  std::unique_ptr<Session> *session,
                  string &input_layer, string &output_layer,
@@ -271,8 +273,6 @@ int main(int argc, char *argv[]) {
   double input_aspect_ratio = 1.0;
   int32 input_channels = 3;
   int32 input_batch_size = 1;
-//  double input_mean = 0;
-//  double input_std = 255;
   string input_layer = "input_3";
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
@@ -337,20 +337,6 @@ int main(int argc, char *argv[]) {
   image_width = orig_image_mat.cols;
   image_height = orig_image_mat.rows;
   std::cout << "Image x width " << image_width << " and y height " << image_height << std::endl;
-//  // Get image mean and stddev for tensorflow normalization
-//  cv::Scalar mean, stddev;
-//  cv::meanStdDev(orig_image_mat, mean, stddev);
-//  input_mean = 0;
-//  double raw_input_std = 0;
-//  for (int i=0; i<input_channels; i++){
-//    input_mean += mean[i];
-//    raw_input_std += stddev[i];
-//  }
-//  input_mean /= input_channels;
-//  raw_input_std /= input_channels;
-//  input_std = std::max(raw_input_std, 1/sqrt(image_width * image_height));
-////  input_std = 255; // TODO testing
-//  std::cout << "Mean all-channel Mean " << input_mean << " and mean all-channel StdDev " << input_std << std::endl;
 
 
   // break into pieces if input image is not square
@@ -402,37 +388,15 @@ int main(int argc, char *argv[]) {
         cv::Vec3b pixel = sub_images[sub_index].at<cv::Vec3b>(y, x);
         // tensorflow reads files as BGR, so need to order/reorder data that way
 //        std::cout << "Pixel " << x << " " << y << " is " << pixel << std::endl;
-        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //R
+        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //B
         input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
-        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //B
+        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //R
 //        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[0]; //R
 //        input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
 //        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[2]; //B
       }
     }
   }
-
-
-//  // TODO testing resize and normalize input by mean and std
-//  std::vector<Tensor> tresized_normal_tensors;
-//  Status tresized_normalize_status = ::hive_segmentation::ResizeTensor(input_tensor, &tresized_normal_tensors, input_height, input_width);
-//  if (!tresized_normalize_status.ok()) {
-//    LOG(ERROR) << "Error: Test Input tensor normalization failed: " << tresized_normalize_status;
-//    return -1;
-//  }
-//  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
-//  float tmean, tstd;
-//  Status tmean_status = ::hive_segmentation::MeanTensor(tresized_normal_tensors[0], tmean);
-//  if (!tmean_status.ok()) {
-//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << tmean_status;
-//    return -1;
-//  }
-//  Status tstd_status = ::hive_segmentation::StdTensor(tresized_normal_tensors[0], tmean, tstd);
-//  if (!tstd_status.ok()) {
-//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << tstd_status;
-//    return -1;
-//  }
-
 
 
   // resize and normalize input by mean and std
@@ -444,10 +408,6 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  // TODO testing
-  float tmean, tstd;
-  Status tmean_status = ::hive_segmentation::MeanTensor(resized_normal_tensors[0], tmean);
-  Status tstd_status = ::hive_segmentation::StdTensor(resized_normal_tensors[0], tmean, tstd);
 
   // Actually run the images through the model.
   std::cout << "Running images in the model" << std::endl;
@@ -480,11 +440,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
   // resize original image to use for rgb colors (first three channels) in output tiff file
   cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
-//  if (scale_percent != 100) {
-    cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
-//  } else {
-//    resized_mat = orig_image_mat;
-//  }
+  cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
   //  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
   //  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
   assert(resized_mat.cols == final_image_width);
@@ -508,7 +464,7 @@ int main(int argc, char *argv[]) {
 
 
   // prepare output model data for merging into tiff output
-  // TODO use rectangles data here rather than hard coding with offset and overlap
+  // TODO use rectangles vector data here rather than hard coding with offset and overlap
   // setup for getting the underlying array back from the tensor
   auto resized_output_array = resized_outputs[0].flat<float>().data();
   auto *float_resized_output_array = static_cast<float*>(resized_output_array);
@@ -543,18 +499,11 @@ int main(int argc, char *argv[]) {
   TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
   TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
   TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-  //  TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_SEPARATE);
-  //  TIFFSetField(tif, TIFFTAG_XRESOLUTION, 1.0);
-  //  TIFFSetField(tif, TIFFTAG_YRESOLUTION, 1.0);
-  //  TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, 1);
   TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
   TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
   TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK);
-  //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, 0);
-  //  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
   TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_height));
   TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0x0);
-  //  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_width * output_channels));
 
   uint8_t arr[final_image_width * output_channels];
   for (auto i = 0; i < final_image_height; i++)  {//test with square
@@ -565,7 +514,7 @@ int main(int argc, char *argv[]) {
       pixel_value = resized_mat.at<cv::Vec3b>(i, j);
       for (auto k = 0; k < 3; k++) {
         // set to rgb colors here
-        // TODO check colors--do we need BGR for our program to extract right colors??
+        // we need BGR in tiff for hivemapper to extract right colors so reverse pixel color order
         auto scaled_pixel = uint8_t(scale_pixel[k] * float(pixel_value.val[2-k]));
 //        std::cout << "i " << i << " j " << j << " val " << uint(scaled_pixel) << std::endl;
         arr[j*output_channels + k] = scaled_pixel;
