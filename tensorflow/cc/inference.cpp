@@ -73,7 +73,7 @@ Status NormalizeTensor(const Tensor &in_tensor, std::vector<Tensor> *out_tensors
   auto var = tensorflow::ops::Sub(root.WithOpName("var"), mean2, tensorflow::ops::Square(root, mean));
   auto std = tensorflow::ops::Sqrt(root.WithOpName("std"), var);
   // need a min value for std = 1/sqrt(num_pixels)
-  // TODO test if this is number of pixels or colors * pixels
+  // TODO dwh: test if this is number of pixels (probably) or colors * pixels (but OK too)
   // alternative is something like the python call: num_pixels = math_ops.reduce_prod(array_ops.shape(image)[-3:])
   auto num_pixels = tensorflow::ops::Cast(root.WithOpName("num_pixels"), tensorflow::ops::Size(root, resized), tensorflow::DT_FLOAT);
   auto min_std = tensorflow::ops::Rsqrt(root.WithOpName("min_std"),  num_pixels);
@@ -260,7 +260,7 @@ Status LoadGraph(const string &graph_file_name,
 
 int main(int argc, char *argv[]) {
   // These are the command-line flags the program can understand.
-  // TODO input should be list of files or a file name containing a list of files and a corresponding file with a list of output file names
+  // TODO dwh: input should be list of files or a file name containing a list of files and a corresponding file with a list of output file names
   // input should include resize scale percent
   float scale_percent = 100;
   string image_filename = "2016-tesla-model-s-17-of-43.jpg";
@@ -303,7 +303,7 @@ int main(int argc, char *argv[]) {
 
   // First we load and initialize the model.
   std::unique_ptr<tensorflow::Session> session;
-  // TODO use gpu for session if available
+  // TODO dwh: use gpu for session if available
   std::cout << "Set up session" << std::endl;
   string graph_path = tensorflow::io::JoinPath(root_dir, graph);
   Status load_graph_status = ::hive_segmentation::LoadGraph(graph_path, &session, input_layer, output_layer, &input_batch_size, &input_width, &input_height, &input_channels);
@@ -320,7 +320,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Model colors: " << input_channels << std::endl;
 
 
-  // TODO repeat the following for all images in scene
+  // TODO dwh: repeat the following for all images in scene
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
   std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
@@ -345,7 +345,7 @@ int main(int argc, char *argv[]) {
   cv::Mat leftImage(image_height, image_height, CV_8UC3);
   cv::Mat rightImage(image_height, image_height, CV_8UC3);
   cv::Rect leftROI, rightROI;
-  if ( double(image_height) > double(image_width) * input_aspect_ratio ) {
+  if (image_height > int(float(image_width) * input_aspect_ratio)) {
     LOG(ERROR) << "Error: Image height is proportionally greater than image width";
     return -1;
   }
@@ -355,7 +355,7 @@ int main(int argc, char *argv[]) {
       LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
       return -1;
     }
-    // TODO fix the following for non-square input
+    // TODO dwh: fix the following for non-square input
     // Setup a rectangle to define square sub-region on left side of image
     leftROI = cv::Rect(0, 0, image_height, image_height);
     //    std::cout << "Left " << leftROI << std::endl;
@@ -447,24 +447,24 @@ int main(int argc, char *argv[]) {
   assert(resized_mat.rows == final_image_height);
 
 
-  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
-  float min_class, max_class;
-  Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
-  if (!min_status.ok()) {
-    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << min_status;
-    return -1;
-  }
-  Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
-  if (!max_status.ok()) {
-    LOG(ERROR) << "Error: Getting max_class for normalization failed: " << max_status;
-    return -1;
-  }
-  auto range_class = max_class - min_class;
-  std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
+//  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
+//  float min_class, max_class;
+//  Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
+//  if (!min_status.ok()) {
+//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << min_status;
+//    return -1;
+//  }
+//  Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
+//  if (!max_status.ok()) {
+//    LOG(ERROR) << "Error: Getting max_class for normalization failed: " << max_status;
+//    return -1;
+//  }
+//  auto range_class = max_class - min_class;
+//  std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
 
 
   // prepare output model data for merging into tiff output
-  // TODO use rectangles vector data here rather than hard coding with offset and overlap
+  // TODO dwh: use rectangles vector data here rather than hard coding with offset and overlap
   // setup for getting the underlying array back from the tensor
   auto resized_output_array = resized_outputs[0].flat<float>().data();
   auto *float_resized_output_array = static_cast<float*>(resized_output_array);
@@ -496,6 +496,7 @@ int main(int argc, char *argv[]) {
   TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, final_image_width);
   TIFFSetField(tif, TIFFTAG_IMAGELENGTH, final_image_height);
   TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, output_channels);
+  // if 8-bits doesn't have the fidelity needed can switch to 16 bit tiff images
   TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
   TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
   TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
@@ -509,9 +510,10 @@ int main(int argc, char *argv[]) {
   for (auto i = 0; i < final_image_height; i++)  {//test with square
     float scale_pixel[3] = {1.f, 1.f, 1.f};
     cv::Vec3b pixel_value;
-    float segmentation_value;
     for (auto j = 0; j < final_image_width; j++) {
       pixel_value = resized_mat.at<cv::Vec3b>(i, j);
+      std::vector<double> segmentation_floats;
+      double segmentation_value = 0;
       for (auto k = 0; k < 3; k++) {
         // set to rgb colors here
         // we need BGR in tiff for hivemapper to extract right colors so reverse pixel color order
@@ -542,15 +544,35 @@ int main(int argc, char *argv[]) {
               float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
                   + (i * final_image_height + (j - offset)) * output_classes + s - 3];
         }
-        // normalize it to global class values on a scale of 0-1
-        segmentation_value -= min_class;
-        segmentation_value /= range_class;
-        assert(segmentation_value >= 0.f);
-        assert(segmentation_value <= 1.f);
-        // scale to 8 bit pixel value
-        segmentation_value *= 255.f;
+        segmentation_floats.push_back(segmentation_value);
+//        segmentation_floats->insert(s, segmentation_value);
 //        std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
-        arr[j*output_channels + s] = uint8_t(segmentation_value);
+      }
+      // normalize classes to 0-1 float values
+//      std::cout << "Raw pixel " << i << " " << j << " ";
+//      for ( auto &value : segmentation_floats) std::cout << value << " ";
+//      std::cout << std::endl;
+      double normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
+      for ( auto &value : segmentation_floats) value -= normalization_min;
+      auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
+      double normalization_range = normalization_max - normalization_min;
+      normalization_range = (normalization_range == 0)? 1. : normalization_range;
+//      std::cout << "Range pixel " << i << " " << j << " min is " << normalization_min << " and max is " << normalization_max << " for total range " << normalization_range << std::endl;
+      for ( auto &value : segmentation_floats) value /= normalization_range;
+      // make into probability using sum of all values in pixel classes
+      double normalization_sum = 0;
+      for ( auto value : segmentation_floats) normalization_sum += value;
+      // if sum is zero then all classes are equally possible--note argmax takes first match which will be unknown class
+      normalization_sum = (normalization_sum == 0)? 1. / double(output_classes) : normalization_sum;
+      for ( auto &value : segmentation_floats) value /= normalization_sum;
+//      std::cout << "Sum is " << normalization_sum << std::endl;
+//      std::cout << "Normalized pixel " << i << " " << j << " ";
+//      for ( auto &value : segmentation_floats) std::cout << value << " ";
+//      std::cout << std::endl;
+      for (int s = 0; s < output_classes; s++) {
+        // scale to 8 bit pixel value--note may not sum to 1 now so not strictly a probability anymore
+        arr[j*output_channels + input_channels + s] = uint8_t(std::round(segmentation_floats[s] * 255.f));
+//        std::cout << "Final pixel " << i << " " << j << " " << s << " " << std::round(segmentation_floats[s] * 255.f) << std::endl;
       }
     }
     TIFFWriteScanline(tif, &arr, i, 0);
