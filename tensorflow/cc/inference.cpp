@@ -263,8 +263,8 @@ int main(int argc, char *argv[]) {
   // TODO dwh: input should be list of files or a file name containing a list of files and a corresponding file with a list of output file names
   // input should include resize scale percent
   float scale_percent = 100;
-  string image_filename = "2016-tesla-model-s-17-of-43.jpg";
-  string image_result_filename = "2016-tesla-model-s-17-of-43.tif";
+  string image_filename = "";
+  string image_result_filename = "";
   string graph = "my_model.pb";
   int image_width = 512;
   int image_height = 512;
@@ -279,15 +279,15 @@ int main(int argc, char *argv[]) {
   string root_dir = "./";
   // Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
-    Flag("image", &image_filename, "full path image to be processed"),
-    Flag("results", &image_result_filename, "full path processed image results"),
+    Flag("image", &image_filename, "full path image to be processed--mandatory"),
+    Flag("results", &image_result_filename, "full path processed image results--default is image filename with .tif extension"),
     Flag("scale", &scale_percent, "percent to scale output results"),
     Flag("graph", &graph, "graph to be executed"),
     Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
-  if (!parse_result) {
+  if (!parse_result || image_filename.empty()) {
     LOG(ERROR) << usage;
     return -1;
   }
@@ -330,6 +330,7 @@ int main(int argc, char *argv[]) {
 //  orig_image_mat = ::cv::imread(image_filename, cv::IMREAD_COLOR);   // Read the file as BGR
   if(! orig_image_mat.data )                              // Check for invalid input
   {
+    // TODO dwh: try opening image_filename as a txt file with strings and same with image_result_filename
     LOG(ERROR) <<  "Error: Could not open or find the image" << image_filename;
     return -1;
   }
@@ -491,6 +492,10 @@ int main(int argc, char *argv[]) {
   // merge and save data into tiff file
   auto output_channels = output_classes + input_channels;
   std::cout << "Building TIFF of size " << final_image_width << " X " << final_image_height << " X " << output_channels << std::endl;
+  if (image_result_filename.empty()){
+    std::cout << "Using input filename " << image_filename << " as basis for output file name: " << image_result_filename << "." << std::endl;
+    image_result_filename = image_filename.substr(0, image_filename.find_last_of('.'))+".tif";
+  }
   std::cout << "Saving Tiff to " << image_result_filename << std::endl;
   TIFF *tif = TIFFOpen(image_result_filename.c_str(), "w");
   TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, final_image_width);
