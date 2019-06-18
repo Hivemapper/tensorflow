@@ -9,6 +9,7 @@
 #include <tiffio.h>
 #include <assert.h>
 #include <algorithm>
+#include <iterator>
 #include <opencv2/core/core.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -48,6 +49,8 @@ using ::tensorflow::GraphDef;
 using ::tensorflow::Scope;
 using ::tensorflow::Session;
 using ::tensorflow::SessionOptions;
+using ::std::ifstream;
+using ::std::istream_iterator;
 
 namespace hive_segmentation {
 
@@ -255,6 +258,50 @@ Status LoadGraph(const string &graph_file_name,
   return Status::OK();
 }
 
+int load_images_from_file(const string &image_filename,
+                          const string &image_result_filename,
+                          std::vector<std::string> *bulk_images,
+                          std::vector<std::string> *bulk_results) {
+
+  ::cv::Mat orig_image_mat;
+  ifstream bulk_image_file(image_filename);
+  std::copy(istream_iterator<string>(bulk_image_file),
+            istream_iterator<string>(),
+            back_inserter(*bulk_images));
+  if (bulk_images->empty()) {
+    LOG(ERROR) <<  "Error: Could not open or find the image: " << image_filename;
+    return -1;
+  } else {
+    for (auto &filestr : *bulk_images) filestr.erase(remove(filestr.begin(), filestr.end(), '\"' ), filestr.end());
+    std::cout << "Read in " << bulk_images->size() << " input images" << std::endl;
+  }
+  if (!image_result_filename.empty()) {
+    // try opening image_result_filename as an image else it is a txt file with strings
+    orig_image_mat = ::cv::imread(image_result_filename, cv::COLOR_BGR2RGB);
+    if(orig_image_mat.data ) {
+      LOG(ERROR) <<  "Error: input is an image file list but results is an image: " << image_result_filename;
+      return -1;
+    } else {
+      ifstream bulk_results_file(image_result_filename);
+      std::copy(istream_iterator<string>(bulk_results_file),
+                istream_iterator<string>(),
+                back_inserter(*bulk_results));
+    }
+  }
+  // if there is no results file, or outputs is not equal to inputs, build outputs based on image_filename file names with tif extension
+  if (image_result_filename.empty() || (bulk_images->size() != bulk_results->size())) {
+    bulk_results->clear();
+    for (auto const &image_file : *bulk_images) {
+      bulk_results->push_back(image_file.substr(0, image_file.find_last_of('.'))+".tif");
+    }
+    std::cout << "Generated " << bulk_results->size() << " result image file names" << std::endl;
+  } else {
+    for (auto &filestr : *bulk_results) filestr.erase(remove(filestr.begin(), filestr.end(), '\"' ), filestr.end());
+    std::cout << "Read in " << bulk_results->size() << " result image file names" << std::endl;
+  }
+  return 0;
+}
+
 } // end hive_segmentation namespace
 
 
@@ -265,6 +312,8 @@ int main(int argc, char *argv[]) {
   float scale_percent = 100;
   string image_filename = "";
   string image_result_filename = "";
+  std::vector<std::string> bulk_images {};
+  std::vector<std::string> bulk_results {};
   string graph = "my_model.pb";
   int image_width = 512;
   int image_height = 512;
@@ -277,6 +326,8 @@ int main(int argc, char *argv[]) {
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
   string root_dir = "./";
+  bool do_quads = false; // true;
+  float overlap_fraction = 1.1;
   // Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
     Flag("image", &image_filename, "full path image to be processed--mandatory"),
@@ -320,7 +371,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Model colors: " << input_channels << std::endl;
 
 
-  // TODO dwh: repeat the following for all images in scene
+  // try loading image as an image and if it fails, check to see if it is a list of images
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
   std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
@@ -328,262 +379,310 @@ int main(int argc, char *argv[]) {
   // note natural imread uses BGR color order so want to use RGB instead
   orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);// CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file as RGB
 //  orig_image_mat = ::cv::imread(image_filename, cv::IMREAD_COLOR);   // Read the file as BGR
-  if(! orig_image_mat.data )                              // Check for invalid input
-  {
-    // TODO dwh: try opening image_filename as a txt file with strings and same with image_result_filename
-    LOG(ERROR) <<  "Error: Could not open or find the image" << image_filename;
-    return -1;
-  }
-  // Get actual image size so we can rescale results at end with reference to this
-  image_width = orig_image_mat.cols;
-  image_height = orig_image_mat.rows;
-  std::cout << "Image x width " << image_width << " and y height " << image_height << std::endl;
-
-
-  // break into pieces if input image is not square
-  std::vector<cv::Mat> sub_images;
-  std::vector<cv::Rect> rectangles;
-  cv::Mat leftImage(image_height, image_height, CV_8UC3);
-  cv::Mat rightImage(image_height, image_height, CV_8UC3);
-  cv::Rect leftROI, rightROI;
-  if (image_height > int(float(image_width) * input_aspect_ratio)) {
-    LOG(ERROR) << "Error: Image height is proportionally greater than image width";
-    return -1;
-  }
-  if( double(image_height) != double(image_width) * input_aspect_ratio ) {
-//    (image_width * input_height) != (image_height * input_width) ) {
-    if ( double(image_width) * input_aspect_ratio > double( 2 * image_height )){
-      LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
+  if(! orig_image_mat.data ) {                             // Check for invalid input
+    // try opening image_filename as a txt file with strings and same with image_result_filename
+    int success = hive_segmentation::load_images_from_file(image_filename, image_result_filename, &bulk_images, &bulk_results);
+    if (success != 0) {
       return -1;
     }
-    // TODO dwh: fix the following for non-square input
-    // Setup a rectangle to define square sub-region on left side of image
-    leftROI = cv::Rect(0, 0, image_height, image_height);
-    //    std::cout << "Left " << leftROI << std::endl;
-    // Crop the full image to that image contained by the rectangle myROI
-    // Note that this doesn't copy the data
-    leftImage = orig_image_mat(leftROI);
-    sub_images.push_back(leftImage);
-    rectangles.push_back(leftROI);
-
-    // Setup a rectangle to define square sub-region on right side of image
-    rightROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
-    //    std::cout << "Right " << rightROI << std::endl;
-    rightImage = orig_image_mat(rightROI);
-    sub_images.push_back(rightImage);
-    rectangles.push_back(rightROI);
-  } else { //only have one image to process and no recombining
-    sub_images.push_back(orig_image_mat);
-    rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
+  } else {
+    bulk_images.push_back(image_filename);
+    bulk_results.push_back(image_result_filename);
   }
 
 
-  // create tensorflow tensor directly from in-memory opencv mat
-  tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), image_height, image_height, input_channels}));
-  auto input_tensor_mapped = input_tensor.tensor<float, 4>();
-  for( auto sub_index = 0; sub_index < sub_images.size(); sub_index++) {
-    std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
-//    std::cout << "Rows " << sub_images[sub_index].rows << " and cols " << sub_images[sub_index].cols << std::endl;
-    for (int y = 0; y < sub_images[sub_index].rows; y++) {
-      for (int x = 0; x < sub_images[sub_index].cols; x++) {
-        cv::Vec3b pixel = sub_images[sub_index].at<cv::Vec3b>(y, x);
-        // tensorflow reads files as BGR, so need to order/reorder data that way
-//        std::cout << "Pixel " << x << " " << y << " is " << pixel << std::endl;
-        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //B
-        input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
-        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //R
-//        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[0]; //R
-//        input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
-//        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[2]; //B
-      }
+  // now process images
+  while (!bulk_images.empty() && !bulk_results.empty()){
+    image_filename = bulk_images.back();
+    bulk_images.pop_back();
+    image_result_filename = bulk_results.back();
+    bulk_results.pop_back();
+
+    orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);
+    if(! orig_image_mat.data ){
+      LOG(ERROR) <<  "Error: Could not open or find the image: " << image_filename;
+      return -1;
     }
-  }
+
+    // Get actual image size so we can rescale results at end with reference to this
+    image_width = orig_image_mat.cols;
+    image_height = orig_image_mat.rows;
+    std::cout << "Image " << image_filename << " x width " << image_width << " and y height " << image_height << std::endl;
 
 
-  // resize and normalize input by mean and std
-  std::cout << "Resizing and Normalizing input tensor" << std::endl;
-  std::vector<Tensor> resized_normal_tensors;
-  Status resized_normalize_status = ::hive_segmentation::NormalizeTensor(input_tensor, &resized_normal_tensors, input_height, input_width); //, input_mean, input_std);
-  if (!resized_normalize_status.ok()) {
-    LOG(ERROR) << "Error: Input tensor normalization failed: " << resized_normalize_status;
-    return -1;
-  }
-
-
-  // Actually run the images through the model.
-  std::cout << "Running images in the model" << std::endl;
-  std::vector<Tensor> outputs;
-  Status run_status = session->Run({{input_layer, resized_normal_tensors[0]}},
-                                   {output_layer}, {}, &outputs);
-  if (!run_status.ok()) {
-    LOG(ERROR) << "Error: Running model failed: " << run_status;
-    return -1;
-  }
-  std::cout << "Finished running model with " << outputs.size() << " results" << std::endl;
-  if ( outputs.size() != 1 ) {
-    LOG(ERROR) << "Error: invalid number of outputs: " << outputs.size();
-    return -1;
-  }
-  auto const &output = outputs[0];
-  output_classes = uint(output.shape().dim_size(3));
-  std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
-
-
-  // resize model output as percent of actual image dimensions
-  auto final_image_height = uint32(scale_percent * double(image_height) / 100);
-  auto final_image_width = uint32(scale_percent * double(image_width) / 100);
-  std::vector<Tensor> resized_outputs;
-  Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
-  if (!resize_status.ok()) {
-    LOG(ERROR) << "Error: Resizing output from model failed: " << resize_status;
-    return -1;
-  }
-  std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
-  // resize original image to use for rgb colors (first three channels) in output tiff file
-  cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
-  cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
-  //  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
-  //  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
-  assert(resized_mat.cols == final_image_width);
-  assert(resized_mat.rows == final_image_height);
-
-
-//  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
-//  float min_class, max_class;
-//  Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
-//  if (!min_status.ok()) {
-//    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << min_status;
-//    return -1;
-//  }
-//  Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
-//  if (!max_status.ok()) {
-//    LOG(ERROR) << "Error: Getting max_class for normalization failed: " << max_status;
-//    return -1;
-//  }
-//  auto range_class = max_class - min_class;
-//  std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
-
-
-  // prepare output model data for merging into tiff output
-  // TODO dwh: use rectangles vector data here rather than hard coding with offset and overlap
-  // setup for getting the underlying array back from the tensor
-  auto resized_output_array = resized_outputs[0].flat<float>().data();
-  auto *float_resized_output_array = static_cast<float*>(resized_output_array);
-  // Make blending array for combining multiple class segmentations
-  float blending_factor[final_image_width];
-  int overlap = (2 * final_image_height) - final_image_width;
-  int offset = final_image_width - final_image_height;
-  for (int i = 0; i < final_image_width; i++) {
-    if ( sub_images.size() == 1 ) { // only one output so no blending will be done
-      blending_factor[i] = 0;
-    } else {
-      if (i <= overlap) { // only first sub image will be used
-        blending_factor[i] = 0;
-      } else if (i > final_image_height) { // only second sub image will be used
-        blending_factor[i] = 1;
-      } else { // two sub images will be combined by a linear scale
-        blending_factor[i] = float(i - offset) / float(overlap);
-//        std::cout << i << " is " << blending_factor[i] << std::endl;
-      }
+    // break into pieces if input image is not square
+    int first_size = image_height;
+    int quad_size = 600; // max(int(image_size * overlap_fraction), model_size);
+    std::vector<cv::Mat> sub_images;
+    std::vector<cv::Rect> rectangles;
+    cv::Mat leftImage(image_height, image_height, CV_8UC3);
+    cv::Mat rightImage(image_height, image_height, CV_8UC3);
+    cv::Rect leftROI, rightROI;
+    if (image_height > int(float(image_width) * input_aspect_ratio)) {
+      LOG(ERROR) << "Error: Image height is proportionally greater than image width";
+      return -1;
     }
-  }
-
-
-  // merge and save data into tiff file
-  auto output_channels = output_classes + input_channels;
-  std::cout << "Building TIFF of size " << final_image_width << " X " << final_image_height << " X " << output_channels << std::endl;
-  if (image_result_filename.empty()){
-    std::cout << "Using input filename " << image_filename << " as basis for output file name: " << image_result_filename << "." << std::endl;
-    image_result_filename = image_filename.substr(0, image_filename.find_last_of('.'))+".tif";
-  }
-  std::cout << "Saving Tiff to " << image_result_filename << std::endl;
-  TIFF *tif = TIFFOpen(image_result_filename.c_str(), "w");
-  TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, final_image_width);
-  TIFFSetField(tif, TIFFTAG_IMAGELENGTH, final_image_height);
-  TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, output_channels);
-  // if 8-bits doesn't have the fidelity needed can switch to 16 bit tiff images
-  TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-  TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
-  TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-  TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-  TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
-  TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK);
-  TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_height));
-  TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0x0);
-
-  uint8_t arr[final_image_width * output_channels];
-  for (auto i = 0; i < final_image_height; i++)  {//test with square
-    float scale_pixel[3] = {1.f, 1.f, 1.f};
-    cv::Vec3b pixel_value;
-    for (auto j = 0; j < final_image_width; j++) {
-      pixel_value = resized_mat.at<cv::Vec3b>(i, j);
-      std::vector<double> segmentation_floats;
-      double segmentation_value = 0;
-      for (auto k = 0; k < 3; k++) {
-        // set to rgb colors here
-        // we need BGR in tiff for hivemapper to extract right colors so reverse pixel color order
-        auto scaled_pixel = uint8_t(scale_pixel[k] * float(pixel_value.val[2-k]));
-//        std::cout << "i " << i << " j " << j << " val " << uint(scaled_pixel) << std::endl;
-        arr[j*output_channels + k] = scaled_pixel;
+    if( double(image_height) != double(image_width) * input_aspect_ratio ) {
+  //    (image_width * input_height) != (image_height * input_width) ) {
+      if ( double(image_width) * input_aspect_ratio > double( 2 * image_height )){
+        LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
+        return -1;
       }
-      for (int s = 3; s < output_channels; s++) {
-        // set to segmentation here and blend between images
-        int batch_image;
-        if ( blending_factor[j] == 0 ) { // use first sub image
-          batch_image = 0;
-          segmentation_value =
-              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
-                  + (i * final_image_height + j) * output_classes + s - 3];
-        } else if ( blending_factor[j] == 1 ) { // use second sub image
-          batch_image = 1;
-          segmentation_value =
-              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
-                  + (i * final_image_height + (j - offset)) * output_classes + s - 3];
-        } else { // use both sub images in proportion using blending factor
-          batch_image = 0;
-          segmentation_value = (1 - blending_factor[j]) *
-              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
-                  + (i * final_image_height + j) * output_classes + s - 3];
-          batch_image = 1;
-          segmentation_value += blending_factor[j] *
-              float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
-                  + (i * final_image_height + (j - offset)) * output_classes + s - 3];
+      // TODO dwh: fix the following for non-square input
+      // Setup a rectangle to define square sub-region on left side of image
+      leftROI = cv::Rect(0, 0, image_height, image_height);
+      //    std::cout << "Left " << leftROI << std::endl;
+      // Crop the full image to that image contained by the rectangle myROI
+      // Note that this doesn't copy the data
+      leftImage = orig_image_mat(leftROI);
+
+      // Setup a rectangle to define square sub-region on right side of image
+      rightROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
+      //    std::cout << "Right " << rightROI << std::endl;
+      rightImage = orig_image_mat(rightROI);
+
+      if ( do_quads ) {
+        std::cout << "Breaking up image into two quads of subimages" << std::endl;
+        sub_images.push_back(leftImage(cv::Rect(0, 0, quad_size, quad_size)));
+        rectangles.push_back(cv::Rect(0, 0, quad_size, quad_size));
+        sub_images.push_back(leftImage(cv::Rect(first_size - quad_size, 0, first_size, quad_size)));
+        rectangles.push_back(cv::Rect(first_size - quad_size, 0, first_size, quad_size));
+        sub_images.push_back(leftImage(cv::Rect(0, first_size - quad_size, quad_size, first_size)));
+        rectangles.push_back(cv::Rect(0, first_size - quad_size, quad_size, first_size));
+        sub_images.push_back(leftImage(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size)));
+        rectangles.push_back(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size));
+        sub_images.push_back(rightImage(cv::Rect(0, 0, quad_size, quad_size)));
+        rectangles.push_back(cv::Rect(0, 0, quad_size, quad_size));
+        sub_images.push_back(rightImage(cv::Rect(first_size - quad_size, 0, first_size, quad_size)));
+        rectangles.push_back(cv::Rect(first_size - quad_size, 0, first_size, quad_size));
+        sub_images.push_back(rightImage(cv::Rect(0, first_size - quad_size, quad_size, first_size)));
+        rectangles.push_back(cv::Rect(0, first_size - quad_size, quad_size, first_size));
+        sub_images.push_back(rightImage(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size)));
+        rectangles.push_back(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size));
+      } else {
+        std::cout << "Breaking up image into two subimages" << std::endl;
+        sub_images.push_back(leftImage);
+        rectangles.push_back(leftROI);
+
+        sub_images.push_back(rightImage);
+        rectangles.push_back(rightROI);
+      }
+    } else { //only have one image to process and no recombining
+      sub_images.push_back(orig_image_mat);
+      rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
+    }
+
+
+    // create tensorflow tensor directly from in-memory opencv mat
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), image_height, image_height, input_channels}));
+    auto input_tensor_mapped = input_tensor.tensor<float, 4>();
+    for( auto sub_index = 0; sub_index < sub_images.size(); sub_index++) {
+      std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
+  //    std::cout << "Rows " << sub_images[sub_index].rows << " and cols " << sub_images[sub_index].cols << std::endl;
+      for (int y = 0; y < sub_images[sub_index].rows; y++) {
+        for (int x = 0; x < sub_images[sub_index].cols; x++) {
+          cv::Vec3b pixel = sub_images[sub_index].at<cv::Vec3b>(y, x);
+          // tensorflow reads files as BGR, so need to order/reorder data that way
+  //        std::cout << "Pixel " << x << " " << y << " is " << pixel << std::endl;
+          input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //B
+          input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
+          input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //R
+  //        input_tensor_mapped(sub_index, y, x, 0) = pixel.val[0]; //R
+  //        input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
+  //        input_tensor_mapped(sub_index, y, x, 2) = pixel.val[2]; //B
         }
-        segmentation_floats.push_back(segmentation_value);
-//        segmentation_floats->insert(s, segmentation_value);
-//        std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
-      }
-      // normalize classes to 0-1 float values
-//      std::cout << "Raw pixel " << i << " " << j << " ";
-//      for ( auto &value : segmentation_floats) std::cout << value << " ";
-//      std::cout << std::endl;
-      double normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
-      for ( auto &value : segmentation_floats) value -= normalization_min;
-      auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
-      double normalization_range = normalization_max - normalization_min;
-      normalization_range = (normalization_range == 0)? 1. : normalization_range;
-//      std::cout << "Range pixel " << i << " " << j << " min is " << normalization_min << " and max is " << normalization_max << " for total range " << normalization_range << std::endl;
-      for ( auto &value : segmentation_floats) value /= normalization_range;
-      // make into probability using sum of all values in pixel classes
-      double normalization_sum = 0;
-      for ( auto value : segmentation_floats) normalization_sum += value;
-      // if sum is zero then all classes are equally possible--note argmax takes first match which will be unknown class
-      normalization_sum = (normalization_sum == 0)? 1. / double(output_classes) : normalization_sum;
-      for ( auto &value : segmentation_floats) value /= normalization_sum;
-//      std::cout << "Sum is " << normalization_sum << std::endl;
-//      std::cout << "Normalized pixel " << i << " " << j << " ";
-//      for ( auto &value : segmentation_floats) std::cout << value << " ";
-//      std::cout << std::endl;
-      for (int s = 0; s < output_classes; s++) {
-        // scale to 8 bit pixel value--note may not sum to 1 now so not strictly a probability anymore
-        arr[j*output_channels + input_channels + s] = uint8_t(std::round(segmentation_floats[s] * 255.f));
-//        std::cout << "Final pixel " << i << " " << j << " " << s << " " << std::round(segmentation_floats[s] * 255.f) << std::endl;
       }
     }
-    TIFFWriteScanline(tif, &arr, i, 0);
-  }
-  TIFFClose(tif);
 
+
+    // resize and normalize input by mean and std
+    std::cout << "Resizing and Normalizing input tensor" << std::endl;
+    std::vector<Tensor> resized_normal_tensors;
+    Status resized_normalize_status = ::hive_segmentation::NormalizeTensor(input_tensor, &resized_normal_tensors, input_height, input_width); //, input_mean, input_std);
+    if (!resized_normalize_status.ok()) {
+      LOG(ERROR) << "Error: Input tensor normalization failed: " << resized_normalize_status;
+      return -1;
+    }
+
+
+    // Actually run the images through the model.
+    std::cout << "Running images in the model" << std::endl;
+    std::vector<Tensor> outputs;
+    Status run_status = session->Run({{input_layer, resized_normal_tensors[0]}},
+                                     {output_layer}, {}, &outputs);
+    if (!run_status.ok()) {
+      LOG(ERROR) << "Error: Running model failed: " << run_status;
+      return -1;
+    }
+    std::cout << "Finished running model with " << outputs.size() << " results" << std::endl;
+    if ( outputs.size() != 1 ) {
+      LOG(ERROR) << "Error: invalid number of outputs: " << outputs.size();
+      return -1;
+    }
+    auto const &output = outputs[0];
+    output_classes = uint(output.shape().dim_size(3));
+    std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
+
+// TODO dwh: if quads, or two images, blend outputs together here before resizing--will we have heap memory problems??
+// TODO dwh: get rid of later blending in tif generator??
+
+
+    // resize model output as percent of actual image dimensions
+    auto final_image_height = uint32(scale_percent * double(image_height) / 100);
+    auto final_image_width = uint32(scale_percent * double(image_width) / 100);
+    std::vector<Tensor> resized_outputs;
+    Status resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, final_image_height, final_image_height);
+    if (!resize_status.ok()) {
+      LOG(ERROR) << "Error: Resizing output from model failed: " << resize_status;
+      return -1;
+    }
+    std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
+    // resize original image to use for rgb colors (first three channels) in output tiff file
+    cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
+    cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
+    //  std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
+    //  std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
+    assert(resized_mat.cols == final_image_width);
+    assert(resized_mat.rows == final_image_height);
+
+
+  //  // normalize segmentation data--globally because some classes may not be present in output and relative values between classes should be maintained
+  //  float min_class, max_class;
+  //  Status min_status = ::hive_segmentation::MinTensor(resized_outputs[0], output_classes, min_class);
+  //  if (!min_status.ok()) {
+  //    LOG(ERROR) << "Error: Getting min_class for normalization failed: " << min_status;
+  //    return -1;
+  //  }
+  //  Status max_status = ::hive_segmentation::MaxTensor(resized_outputs[0], output_classes, max_class);
+  //  if (!max_status.ok()) {
+  //    LOG(ERROR) << "Error: Getting max_class for normalization failed: " << max_status;
+  //    return -1;
+  //  }
+  //  auto range_class = max_class - min_class;
+  //  std::cout << "For global normalization, the min class value is " << min_class << " and the max is " << max_class << " with a range of " << range_class << std::endl;
+
+
+    // prepare output model data for merging into tiff output
+    // TODO dwh: use rectangles vector data here rather than hard coding with offset and overlap
+    // setup for getting the underlying array back from the tensor
+    auto resized_output_array = resized_outputs[0].flat<float>().data();
+    auto *float_resized_output_array = static_cast<float*>(resized_output_array);
+    // Make blending array for combining multiple class segmentations
+    float blending_factor[final_image_width];
+    int overlap = (2 * final_image_height) - final_image_width;
+    int offset = final_image_width - final_image_height;
+    for (int i = 0; i < final_image_width; i++) {
+      if ( sub_images.size() == 1 ) { // only one output so no blending will be done
+        blending_factor[i] = 0;
+      } else {
+        if (i <= overlap) { // only first sub image will be used
+          blending_factor[i] = 0;
+        } else if (i > final_image_height) { // only second sub image will be used
+          blending_factor[i] = 1;
+        } else { // two sub images will be combined by a linear scale
+          blending_factor[i] = float(i - offset) / float(overlap);
+  //        std::cout << i << " is " << blending_factor[i] << std::endl;
+        }
+      }
+    }
+
+
+    // merge and save data into tiff file
+    auto output_channels = output_classes + input_channels;
+    std::cout << "Building TIFF of size " << final_image_width << " X " << final_image_height << " X " << output_channels << std::endl;
+    if (image_result_filename.empty()){
+      std::cout << "Using input filename " << image_filename << " as basis for output file name: " << image_result_filename << "." << std::endl;
+      image_result_filename = image_filename.substr(0, image_filename.find_last_of('.'))+".tif";
+    }
+    std::cout << "Saving Tiff to " << image_result_filename << std::endl;
+    TIFF *tif = TIFFOpen(image_result_filename.c_str(), "w");
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, final_image_width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, final_image_height);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, output_channels);
+    // if 8-bits doesn't have the fidelity needed can switch to 16 bit tiff images
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, final_image_height));
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0x0);
+
+    uint8_t arr[final_image_width * output_channels];
+    for (auto i = 0; i < final_image_height; i++)  {//test with square
+      float scale_pixel[3] = {1.f, 1.f, 1.f};
+      cv::Vec3b pixel_value;
+      for (auto j = 0; j < final_image_width; j++) {
+        pixel_value = resized_mat.at<cv::Vec3b>(i, j);
+        std::vector<double> segmentation_floats;
+        double segmentation_value = 0;
+        for (auto k = 0; k < 3; k++) {
+          // set to rgb colors here
+          // we need BGR in tiff for hivemapper to extract right colors so reverse pixel color order
+          auto scaled_pixel = uint8_t(scale_pixel[k] * float(pixel_value.val[2-k]));
+  //        std::cout << "i " << i << " j " << j << " val " << uint(scaled_pixel) << std::endl;
+          arr[j*output_channels + k] = scaled_pixel;
+        }
+        for (int s = 3; s < output_channels; s++) {
+          // set to segmentation here and blend between images
+          int batch_image;
+          if ( blending_factor[j] == 0 ) { // use first sub image
+            batch_image = 0;
+            segmentation_value =
+                float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                    + (i * final_image_height + j) * output_classes + s - 3];
+          } else if ( blending_factor[j] == 1 ) { // use second sub image
+            batch_image = 1;
+            segmentation_value =
+                float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                    + (i * final_image_height + (j - offset)) * output_classes + s - 3];
+          } else { // use both sub images in proportion using blending factor
+            batch_image = 0;
+            segmentation_value = (1 - blending_factor[j]) *
+                float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                    + (i * final_image_height + j) * output_classes + s - 3];
+            batch_image = 1;
+            segmentation_value += blending_factor[j] *
+                float_resized_output_array[(batch_image * final_image_height * final_image_height * output_classes)
+                    + (i * final_image_height + (j - offset)) * output_classes + s - 3];
+          }
+          segmentation_floats.push_back(segmentation_value);
+  //        segmentation_floats->insert(s, segmentation_value);
+  //        std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
+        }
+        // normalize classes to 0-1 float values
+  //      std::cout << "Raw pixel " << i << " " << j << " ";
+  //      for ( auto &value : segmentation_floats) std::cout << value << " ";
+  //      std::cout << std::endl;
+        double normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
+        for ( auto &value : segmentation_floats) value -= normalization_min;
+        auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
+        double normalization_range = normalization_max - normalization_min;
+        normalization_range = (normalization_range == 0)? 1. : normalization_range;
+  //      std::cout << "Range pixel " << i << " " << j << " min is " << normalization_min << " and max is " << normalization_max << " for total range " << normalization_range << std::endl;
+        for ( auto &value : segmentation_floats) value /= normalization_range;
+        // make into probability using sum of all values in pixel classes
+        double normalization_sum = 0;
+        for ( auto value : segmentation_floats) normalization_sum += value;
+        // if sum is zero then all classes are equally possible--note argmax takes first match which will be unknown class
+        normalization_sum = (normalization_sum == 0)? 1. / double(output_classes) : normalization_sum;
+        for ( auto &value : segmentation_floats) value /= normalization_sum;
+  //      std::cout << "Sum is " << normalization_sum << std::endl;
+  //      std::cout << "Normalized pixel " << i << " " << j << " ";
+  //      for ( auto &value : segmentation_floats) std::cout << value << " ";
+  //      std::cout << std::endl;
+        for (int s = 0; s < output_classes; s++) {
+          // scale to 8 bit pixel value--note may not sum to 1 now so not strictly a probability anymore
+          arr[j*output_channels + input_channels + s] = uint8_t(std::round(segmentation_floats[s] * 255.f));
+  //        std::cout << "Final pixel " << i << " " << j << " " << s << " " << std::round(segmentation_floats[s] * 255.f) << std::endl;
+        }
+      }
+      TIFFWriteScanline(tif, &arr, i, 0);
+    }
+    TIFFClose(tif);
+
+  } // end while loop for image filenames
 
   std::cout << "Done" << std::endl;
   return 0;
