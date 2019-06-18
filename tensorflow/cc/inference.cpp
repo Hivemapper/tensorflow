@@ -307,14 +307,25 @@ int load_images_from_file(const string &image_filename,
 
 int main(int argc, char *argv[]) {
   // These are the command-line flags the program can understand.
-  // TODO dwh: input should be list of files or a file name containing a list of files and a corresponding file with a list of output file names
-  // input should include resize scale percent
+  // resize scale percent for output results
   float scale_percent = 100;
+  // image_filename can be an image or a file with a list of images--this must be set when invoking function
   string image_filename = "";
+  // optional output result filename defaults to imagename.tif but can be specified as an imagename or a file with a list of imagenames
   string image_result_filename = "";
+  // the tensorflow graph name without the directory (root_dir below is prefixed to name)
+  string graph = "my_model.pb";
+  string root_dir = "./";
+
+  // some config
+  bool do_quads = false; // true;
+  float overlap_fraction = 1.1;
+
+  // data structures to hold multiple image and result names in sequence order
   std::vector<std::string> bulk_images {};
   std::vector<std::string> bulk_results {};
-  string graph = "my_model.pb";
+
+  // data with defaults
   int image_width = 512;
   int image_height = 512;
   int32 input_width = 512;
@@ -325,10 +336,9 @@ int main(int argc, char *argv[]) {
   string input_layer = "input_3";
   string output_layer = "bilinear_up_sampling2d_3/ResizeBilinear";
   uint32 output_classes = 0;
-  string root_dir = "./";
-  bool do_quads = false; // true;
-  float overlap_fraction = 1.1;
-  // Note that all of these types must be tensorflow types to work with Flag
+
+
+  // check flags--Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
     Flag("image", &image_filename, "full path image to be processed--mandatory"),
     Flag("results", &image_result_filename, "full path processed image results--default is image filename with .tif extension"),
@@ -371,14 +381,9 @@ int main(int argc, char *argv[]) {
   std::cout << "Model colors: " << input_channels << std::endl;
 
 
-  // try loading image as an image and if it fails, check to see if it is a list of images
-  // Get the image from disk as a float array of numbers, resized and normalized
-  // to the specifications the main graph expects.
-  std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
+  // try loading image_filename as an image and if it fails, check to see if it is a list of images
   ::cv::Mat orig_image_mat;
-  // note natural imread uses BGR color order so want to use RGB instead
-  orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);// CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file as RGB
-//  orig_image_mat = ::cv::imread(image_filename, cv::IMREAD_COLOR);   // Read the file as BGR
+  orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);
   if(! orig_image_mat.data ) {                             // Check for invalid input
     // try opening image_filename as a txt file with strings and same with image_result_filename
     int success = hive_segmentation::load_images_from_file(image_filename, image_result_filename, &bulk_images, &bulk_results);
@@ -391,14 +396,19 @@ int main(int argc, char *argv[]) {
   }
 
 
-  // now process images
+  // now process images one at a time
   while (!bulk_images.empty() && !bulk_results.empty()){
     image_filename = bulk_images.back();
     bulk_images.pop_back();
     image_result_filename = bulk_results.back();
     bulk_results.pop_back();
 
-    orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);
+    // Get the image from disk as a float array of numbers, resized and normalized
+    // to the specifications the main graph expects.
+    std::cout << "Get image '" << image_filename << "' from disk as float array" << std::endl;
+    // note natural imread uses BGR color order so want to use RGB instead
+    orig_image_mat = ::cv::imread(image_filename, cv::COLOR_BGR2RGB);// CV_LOAD_IMAGE_COLOR); // newer opencv versions will use IMREAD_COLOR);   // Read the file as RGB
+//  orig_image_mat = ::cv::imread(image_filename, cv::IMREAD_COLOR);   // Read the file as BGR
     if(! orig_image_mat.data ){
       LOG(ERROR) <<  "Error: Could not open or find the image: " << image_filename;
       return -1;
@@ -408,8 +418,7 @@ int main(int argc, char *argv[]) {
     image_width = orig_image_mat.cols;
     image_height = orig_image_mat.rows;
     std::cout << "Image " << image_filename << " x width " << image_width << " and y height " << image_height << std::endl;
-
-
+    
     // break into pieces if input image is not square
     int first_size = image_height;
     int quad_size = 600; // max(int(image_size * overlap_fraction), model_size);
