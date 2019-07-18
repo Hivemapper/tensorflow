@@ -735,6 +735,7 @@ tf_cc_binary(
             "-lpthread",
         ],
         "//conditions:default": [
+            "-L/usr/local/lib64",
             "-lm",
             "-lopencv_core",
             "-lopencv_highgui",
