@@ -728,17 +728,16 @@ int main(int argc, char *argv[]) {
 
 
     // break into pieces if input image is not square
-    auto first_size = static_cast<float>(image_height);
-    // TODO dwh: generalize for non-square model input
-    int sub_image_size = std::max(static_cast<int>(first_size * overlap_fraction / 2.f), input_height);
+    int sub_image_height = image_height;
+    int sub_image_width = image_width;
     std::vector<cv::Mat> sub_images {};
     std::vector<cv::Rect> rectangles {};
-    cv::Mat leftImage(image_height, image_height, CV_8UC3);
-    cv::Mat rightImage(image_height, image_height, CV_8UC3);
     if (image_height > static_cast<int>(float(image_width) * input_aspect_ratio)) {
       LOG(ERROR) << "Error: Image height is proportionally greater than image width";
       return -1;
     }
+    cv::Mat leftImage(image_height, image_height, CV_8UC3);
+    cv::Mat rightImage(image_height, image_height, CV_8UC3);
     if(static_cast<double>(image_height) != static_cast<double>(image_width) * input_aspect_ratio) {
   //    (image_width * input_height) != (image_height * input_width)) {
       if (static_cast<double>(image_width) * input_aspect_ratio > static_cast<double>(2 * image_height)){
@@ -759,43 +758,47 @@ int main(int argc, char *argv[]) {
       rightImage = orig_image_mat(rightROI);
 
       if (do_quads) {
-        std::cout << "Breaking up image into two quads of subimages" << std::endl;
+        // TODO dwh: generalize for non-square model input
+        sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
+        // change this
+        sub_image_width = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_width);
+        std::cout << "Breaking up image into two quads of subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
         // TODO dwh: make roi and then use them to make sub images
-        sub_images.push_back(leftImage(cv::Rect(0, 0, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(0, 0, sub_image_size, sub_image_size));
-        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_size, 0, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_size, 0, sub_image_size, sub_image_size));
-        sub_images.push_back(leftImage(cv::Rect(0, leftImage.rows - sub_image_size, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(0, leftImage.rows - sub_image_size, sub_image_size, sub_image_size));
-        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_size, leftImage.rows - sub_image_size, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_size, leftImage.rows - sub_image_size, sub_image_size, sub_image_size));
-        sub_images.push_back(rightImage(cv::Rect(0, 0, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(0, 0, sub_image_size, sub_image_size));
-        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_size, 0, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_size, 0, sub_image_size, sub_image_size));
-        sub_images.push_back(rightImage(cv::Rect(0, rightImage.rows - sub_image_size, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_size, sub_image_size, sub_image_size));
-        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_size, rightImage.rows - sub_image_size, sub_image_size, sub_image_size)));
-        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_size, rightImage.rows - sub_image_size, sub_image_size, sub_image_size));
+        sub_images.push_back(leftImage(cv::Rect(0, 0, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
+        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_width, 0, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
+        sub_images.push_back(leftImage(cv::Rect(0, leftImage.rows - sub_image_height, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(0, leftImage.rows - sub_image_height, sub_image_width, sub_image_height));
+        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_width, leftImage.rows - sub_image_height, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_width, leftImage.rows - sub_image_height, sub_image_width, sub_image_height));
+        sub_images.push_back(rightImage(cv::Rect(0, 0, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
+        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, 0, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
+        sub_images.push_back(rightImage(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
+        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
+        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
       } else {
-        std::cout << "Breaking up image into two subimages" << std::endl;
-        sub_image_size = image_height;
+        sub_image_width = sub_image_height;
+        std::cout << "Breaking up image into two subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
         sub_images.push_back(leftImage);
         rectangles.push_back(leftROI);
-
         sub_images.push_back(rightImage);
         rectangles.push_back(rightROI);
       }
     } else {
       //only have one image to process and no recombining
-      sub_image_size = image_height;
+      std::cout << "Have single image with height " << sub_image_height << " and width " << sub_image_width << std::endl;
       sub_images.push_back(orig_image_mat);
       rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
     }
 
 
     // create tensorflow tensor directly from in-memory opencv mat
-    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), sub_image_size, sub_image_size, input_channels}));
+    // TODO dwh: is height width order correct??
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), sub_image_width, sub_image_height, input_channels}));
     auto input_tensor_mapped = input_tensor.tensor<float, 4>();
     for (std::size_t sub_index = 0; sub_index < sub_images.size(); sub_index++) {
       std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
@@ -851,7 +854,7 @@ int main(int argc, char *argv[]) {
     std::vector<Tensor> resized_outputs {};
     switch (sub_images.size()) {
       case 8: {
-        resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_size, sub_image_size);
+        resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_height, sub_image_width);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
           return -1;
@@ -861,58 +864,67 @@ int main(int argc, char *argv[]) {
         auto *float_output_array8 = static_cast<float *>(output_array8);
 
         // need some temporary data structures
-        auto *merged_top_quad = new float[sub_image_size * leftImage.cols * output_classes];
-        auto *merged_bottom_quad = new float[sub_image_size * leftImage.cols * output_classes];
+        auto *merged_top_quad = new float[sub_image_height * leftImage.cols * output_classes];
+        auto *merged_bottom_quad = new float[sub_image_height * leftImage.cols * output_classes];
         auto *merged_left = new float[leftImage.cols * leftImage.rows * output_classes];
         auto *merged_right = new float[rightImage.cols * rightImage.rows * output_classes];
 
-        // now have 8 dimensional array of size sub_image_size x sub_image_size x num_classes
+        // now have 8 dimensional array of size sub_image_height x sub_image_width x num_classes
         // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
         // (  top    vt  bottom ) hz (  top    vt  bottom )
         //         left           hz           right
         hive_segmentation::hz_merge(float_output_array8,
                                     0,
                                     1,
-                                    sub_image_size,
-                                    sub_image_size,
+                                    sub_image_height,
+                                    sub_image_width,
                                     output_classes,
                                     merged_top_quad,
-                                    sub_image_size,
+                                    sub_image_height,
                                     leftImage.cols);
 
         hive_segmentation::hz_merge(float_output_array8,
                                     2,
                                     3,
-                                    sub_image_size,
-                                    sub_image_size,
+                                    sub_image_height,
+                                    sub_image_width,
                                     output_classes,
                                     merged_bottom_quad,
-                                    sub_image_size,
+                                    sub_image_height,
                                     leftImage.cols);
+
+        hive_segmentation::vert_merge(merged_top_quad,
+                                      merged_bottom_quad,
+                                      sub_image_height,
+                                      leftImage.cols,
+                                      output_classes,
+                                      merged_left,
+                                      leftImage.rows,
+                                      leftImage.cols);
 
         hive_segmentation::hz_merge(float_output_array8,
                                     4,
                                     5,
-                                    sub_image_size,
-                                    sub_image_size,
+                                    sub_image_height,
+                                    sub_image_width,
                                     output_classes,
                                     merged_top_quad,
-                                    sub_image_size,
+                                    sub_image_height,
                                     leftImage.cols);
 
         hive_segmentation::hz_merge(float_output_array8,
                                     6,
                                     7,
-                                    sub_image_size,
-                                    sub_image_size,
+                                    sub_image_height,
+                                    sub_image_width,
                                     output_classes,
                                     merged_bottom_quad,
-                                    sub_image_size,
+                                    sub_image_height,
                                     leftImage.cols);
 
         hive_segmentation::vert_merge(merged_top_quad,
                                     merged_bottom_quad,
-                                    sub_image_size,
+                                    sub_image_height,
                                     rightImage.cols,
                                     output_classes,
                                     merged_right,
