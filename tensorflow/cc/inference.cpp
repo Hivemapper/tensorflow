@@ -317,16 +317,20 @@ void hz_merge(float *results,
               const int target_y,
               const int target_x) {
   int overlap = (2 * num_x) - target_x;
-  // TODO dwh: test if there is overlap
+  assert(num_y == target_y);
+  assert(overlap >= 0);
   int offset = target_x - num_x;
-  float x_blending_factor[target_x];
+  float x_blending_factor[target_x] {};
   std::cout << "Making horizontal blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  for (int i = 0; i < target_x; i++) {
-    if (i <= offset) { // only first sub image will be used
+  for (std::size_t i=0; i<target_x; i++) {
+    if (i <= offset) {
+      // only first sub image will be used
       x_blending_factor[i] = 0;
-    } else if (i > num_x) { // only second sub image will be used
+    } else if (i > num_x) {
+      // only second sub image will be used
       x_blending_factor[i] = 1;
-    } else { // two sub images will be combined by a linear scale
+    } else {
+      // two sub images will be combined by a linear scale
       x_blending_factor[i] = float(i - offset) / float(overlap);
 //      std::cout << i << " is " << x_blending_factor[i] << std::endl;
     }
@@ -337,12 +341,15 @@ void hz_merge(float *results,
     for (auto j = 0; j < target_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
         float segmentation_value = 0;
-        if (x_blending_factor[i] == 0) { // use first sub image
+        if (x_blending_factor[i] == 0) {
+          // use first sub image
           // note tensorflow data is reversed cols and rows
           segmentation_value = results[(first_image * num_y * num_x * num_classes) + (j * num_y + i) * num_classes + s];
-        } else if (x_blending_factor[i] == 1) { // use second sub image
+        } else if (x_blending_factor[i] == 1) {
+          // use second sub image
           segmentation_value = results[(second_image * num_y * num_x * num_classes) + (j * num_y + (i - offset)) * num_classes + s];
-        } else { // use both sub images in proportion using blending factor
+        } else {
+          // use both sub images in proportion using blending factor
           segmentation_value = (1 - x_blending_factor[i]) * results[(first_image * num_y * num_x * num_classes) + (j * num_y + i) * num_classes + s];
           segmentation_value += x_blending_factor[i] * results[(second_image * num_y * num_x * num_classes) + (j * num_y + (i - offset)) * num_classes + s];
         }
@@ -362,16 +369,20 @@ void hz_merge(const float *first_image,
               const int target_y,
               const int target_x) {
   int overlap = (2 * num_x) - target_x;
-  // TODO dwh: test if there is overlap
+  assert(num_y == target_y);
+  assert(overlap >= 0);
   int offset = target_x - num_x;
-  float x_blending_factor[target_x];
+  float x_blending_factor[target_x] {};
   std::cout << "Making horizontal blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  for (int i = 0; i < target_x; i++) {
-    if (i <= offset) { // only first sub image will be used
+  for (std::size_t i=0; i<target_x; i++) {
+    if (i <= offset) {
+      // only first sub image will be used
       x_blending_factor[i] = 0;
-    } else if (i > num_x) { // only second sub image will be used
+    } else if (i > num_x) {
+      // only second sub image will be used
       x_blending_factor[i] = 1;
-    } else { // two sub images will be combined by a linear scale
+    } else {
+      // two sub images will be combined by a linear scale
       x_blending_factor[i] = float(i - offset) / float(overlap);
 //      std::cout << i << " is " << x_blending_factor[i] << std::endl;
     }
@@ -382,15 +393,119 @@ void hz_merge(const float *first_image,
     for (auto j = 0; j < target_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
         float segmentation_value = 0;
-        if (x_blending_factor[i] == 0) { // use first sub image
+        if (x_blending_factor[i] == 0) {
+          // use first sub image
           segmentation_value = first_image[(i * num_y + j) * num_classes + s];
-        } else if (x_blending_factor[i] == 1) { // use second sub image
+        } else if (x_blending_factor[i] == 1) {
+          // use second sub image
           segmentation_value = second_image[((i - offset) * num_y + j) * num_classes + s];
-        } else { // use both sub images in proportion using blending factor
+        } else {
+          // use both sub images in proportion using blending factor
           segmentation_value = (1 - x_blending_factor[i]) * first_image[(i * num_y + j) * num_classes + s];
           segmentation_value += x_blending_factor[i] * second_image[((i - offset) * num_y + j) * num_classes + s];
         }
 //        std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
+        merged_output[(i * target_y + j) * num_classes + s] = segmentation_value;
+      }
+    }
+  }
+}
+
+void vert_merge(float *results,
+                const int first_image,
+                const int second_image,
+                const int num_y,
+                const int num_x,
+                const int num_classes,
+                float *merged_output,
+                const int target_y,
+                const int target_x) {
+  int overlap = (2 * num_y) - target_y;
+  assert(num_x == target_x);
+  assert(overlap >= 0);
+  int offset = target_y - num_y;
+  std::cout << "Making vertical blending array with overlap " << overlap << " and offset " << offset << std::endl;
+  float y_blending_factor[target_y] {};
+  for (std::size_t j=0; j<target_y; j++) {
+    if (j <= offset) {
+      // only first sub image will be used
+      y_blending_factor[j] = 0;
+    } else if (j > num_y) {
+      // only second sub image will be used
+      y_blending_factor[j] = 1;
+    } else {
+      // two sub images will be combined by a linear scale
+      y_blending_factor[j] = float(j - offset) / float(overlap);
+      // std::cout << i << " is " << y_blending_factor[j] << std::endl;
+    }
+  }
+
+  std::cout << "Performing the merge" << std::endl;
+  for (auto i = 0; i < target_x; i++) {
+    for (auto j = 0; j < target_y; j++) {
+      for (auto s = 0; s < num_classes; s++) {
+        float segmentation_value = 0;
+        if (y_blending_factor[j] == 0) {
+          // use first sub image
+          // note tensorflow data is reversed cols and rows
+          segmentation_value = results[(first_image * num_y * num_x * num_classes) + (j * num_y + i) * num_classes + s];
+        } else if (y_blending_factor[j] == 1) {
+          // use second sub image
+          segmentation_value = results[(second_image * num_y * num_x * num_classes) + ((j - offset) * num_y + i) * num_classes + s];
+        } else {
+          // use both sub images in proportion using blending factor
+          segmentation_value = (1 - y_blending_factor[j]) * results[(first_image * num_y * num_x * num_classes) + (j * num_y + i) * num_classes + s];
+          segmentation_value += y_blending_factor[j] * results[(second_image * num_y * num_x * num_classes) + ((j - offset) * num_y + i) * num_classes + s];
+        }
+        merged_output[(i * target_y + j) * num_classes + s] = segmentation_value;
+      }
+    }
+  }
+}
+
+void vert_merge(const float *first_image,
+                const float *second_image,
+                const int num_y,
+                const int num_x,
+                const int num_classes,
+                float *merged_output,
+                const int target_y,
+                const int target_x) {
+  int overlap = (2 * num_y) - target_y;
+  assert(num_x == target_x);
+  assert(overlap >= 0);
+  int offset = target_y - num_y;
+  std::cout << "Making vertical blending array with overlap " << overlap << " and offset " << offset << std::endl;
+  float y_blending_factor[target_y] {};
+  for (std::size_t j=0; j<target_y; j++) {
+    if (j <= offset) {
+      // only first sub image will be used
+      y_blending_factor[j] = 0;
+    } else if (j > num_y) {
+      // only second sub image will be used
+      y_blending_factor[j] = 1;
+    } else {
+      // two sub images will be combined by a linear scale
+      y_blending_factor[j] = float(j - offset) / float(overlap);
+      // std::cout << i << " is " << y_blending_factor[j] << std::endl;
+    }
+  }
+
+  std::cout << "Performing the merge" << std::endl;
+  for (auto i = 0; i < target_x; i++) {
+    for (auto j = 0; j < target_y; j++) {
+      for (auto s = 0; s < num_classes; s++) {
+        float segmentation_value = 0;
+        if (y_blending_factor[j] == 0) {
+          // use first sub image
+          segmentation_value = first_image[(i * num_y + j) * num_classes + s];
+        } else if (y_blending_factor[j] == 1) { // use second sub image
+          segmentation_value = second_image[(i * num_y + (j - offset)) * num_classes + s];
+        } else {
+          // use both sub images in proportion using blending factor
+          segmentation_value = (1 - y_blending_factor[j]) * first_image[(i * num_y + j) * num_classes + s];
+          segmentation_value += y_blending_factor[j] * second_image[(i * num_y + (j - offset)) * num_classes + s];
+        }
         merged_output[(i * target_y + j) * num_classes + s] = segmentation_value;
       }
     }
@@ -436,7 +551,7 @@ int write_tiff_file(const float *merged_output_classes,
         //        std::cout << "i " << i << " j " << j << " val " << uint(scaled_pixel) << std::endl;
         arr[j*output_channels + k] = scaled_pixel;
       }
-      for (int s=0; s<output_channels; s++) {
+      for (int s=0; s<output_classes; s++) {
         segmentation_value = merged_output_classes[(j * final_image_height + i) * output_classes + s];
         segmentation_floats.push_back(segmentation_value);
         //        segmentation_floats->insert(s, segmentation_value);
@@ -464,7 +579,7 @@ int write_tiff_file(const float *merged_output_classes,
       //      std::cout << "Normalized pixel " << i << " " << j << " ";
       //      for (auto &value : segmentation_floats) std::cout << value << " ";
       //      std::cout << std::endl;
-      for (int s = 0; s < output_classes; s++) {
+      for (int s=0; s<output_classes; s++) {
         // scale to 8 bit pixel value--note may not sum to 1 now so not strictly a probability anymore
         arr[j*output_channels + input_channels + s] = uint8_t(std::round(segmentation_floats[s] * 255.f));
         //        std::cout << "Final pixel " << i << " " << j << " " << s << " " << std::round(segmentation_floats[s] * 255.f) << std::endl;
@@ -509,8 +624,8 @@ int main(int argc, char *argv[]) {
   string root_dir = "./";
 
   // some config
-  bool do_quads = false; // true;
-//  float overlap_fraction = 1.1;
+  bool do_quads = false;
+  float overlap_fraction = 1.1;
 
   // data structures to hold multiple image and result names in sequence order
   std::vector<std::string> bulk_images {};
@@ -536,6 +651,7 @@ int main(int argc, char *argv[]) {
     Flag("scale", &scale_percent, "percent to scale output results"),
     Flag("graph", &graph, "graph to be executed"),
     Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
+    Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -604,14 +720,17 @@ int main(int argc, char *argv[]) {
       return -1;
     }
 
+
     // Get actual image size so we can rescale results at end with reference to this
     image_width = orig_image_mat.cols;
     image_height = orig_image_mat.rows;
     std::cout << "Image " << image_filename << " x width " << image_width << " and y height " << image_height << std::endl;
-    
+
+
     // break into pieces if input image is not square
-    int first_size = image_height;
-    int quad_size = 600; // max(int(image_size * overlap_fraction), model_size);
+    auto first_size = static_cast<float>(image_height);
+    // TODO dwh: generalize for non-square model input
+    int sub_image_size = std::max(static_cast<int>(first_size * overlap_fraction / 2.f), input_height);
     std::vector<cv::Mat> sub_images {};
     std::vector<cv::Rect> rectangles {};
     cv::Mat leftImage(image_height, image_height, CV_8UC3);
@@ -628,51 +747,55 @@ int main(int argc, char *argv[]) {
       }
       // TODO dwh: fix the following for non-square input
       // Setup a rectangle to define square sub-region on left side of image
-      auto leftROI = cv::Rect(0, 0, image_height, image_height);
+      auto leftROI = cv::Rect(0, 0, leftImage.cols, leftImage.rows);
       //    std::cout << "Left " << leftROI << std::endl;
       // Crop the full image to that image contained by the rectangle myROI
       // Note that this doesn't copy the data
       leftImage = orig_image_mat(leftROI);
 
       // Setup a rectangle to define square sub-region on right side of image
-      auto rightROI = cv::Rect(image_width - image_height, 0, image_height, image_height);
+      auto rightROI = cv::Rect(image_width - rightImage.cols, 0, rightImage.cols, rightImage.rows);
       //    std::cout << "Right " << rightROI << std::endl;
       rightImage = orig_image_mat(rightROI);
 
       if (do_quads) {
         std::cout << "Breaking up image into two quads of subimages" << std::endl;
-        sub_images.push_back(leftImage(cv::Rect(0, 0, quad_size, quad_size)));
-        rectangles.push_back(cv::Rect(0, 0, quad_size, quad_size));
-        sub_images.push_back(leftImage(cv::Rect(first_size - quad_size, 0, first_size, quad_size)));
-        rectangles.push_back(cv::Rect(first_size - quad_size, 0, first_size, quad_size));
-        sub_images.push_back(leftImage(cv::Rect(0, first_size - quad_size, quad_size, first_size)));
-        rectangles.push_back(cv::Rect(0, first_size - quad_size, quad_size, first_size));
-        sub_images.push_back(leftImage(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size)));
-        rectangles.push_back(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size));
-        sub_images.push_back(rightImage(cv::Rect(0, 0, quad_size, quad_size)));
-        rectangles.push_back(cv::Rect(0, 0, quad_size, quad_size));
-        sub_images.push_back(rightImage(cv::Rect(first_size - quad_size, 0, first_size, quad_size)));
-        rectangles.push_back(cv::Rect(first_size - quad_size, 0, first_size, quad_size));
-        sub_images.push_back(rightImage(cv::Rect(0, first_size - quad_size, quad_size, first_size)));
-        rectangles.push_back(cv::Rect(0, first_size - quad_size, quad_size, first_size));
-        sub_images.push_back(rightImage(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size)));
-        rectangles.push_back(cv::Rect(first_size - quad_size, first_size - quad_size, first_size, first_size));
+        // TODO dwh: make roi and then use them to make sub images
+        sub_images.push_back(leftImage(cv::Rect(0, 0, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(0, 0, sub_image_size, sub_image_size));
+        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_size, 0, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_size, 0, sub_image_size, sub_image_size));
+        sub_images.push_back(leftImage(cv::Rect(0, leftImage.rows - sub_image_size, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(0, leftImage.rows - sub_image_size, sub_image_size, sub_image_size));
+        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_size, leftImage.rows - sub_image_size, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_size, leftImage.rows - sub_image_size, sub_image_size, sub_image_size));
+        sub_images.push_back(rightImage(cv::Rect(0, 0, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(0, 0, sub_image_size, sub_image_size));
+        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_size, 0, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_size, 0, sub_image_size, sub_image_size));
+        sub_images.push_back(rightImage(cv::Rect(0, rightImage.rows - sub_image_size, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_size, sub_image_size, sub_image_size));
+        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_size, rightImage.rows - sub_image_size, sub_image_size, sub_image_size)));
+        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_size, rightImage.rows - sub_image_size, sub_image_size, sub_image_size));
       } else {
         std::cout << "Breaking up image into two subimages" << std::endl;
+        sub_image_size = image_height;
         sub_images.push_back(leftImage);
         rectangles.push_back(leftROI);
 
         sub_images.push_back(rightImage);
         rectangles.push_back(rightROI);
       }
-    } else { //only have one image to process and no recombining
+    } else {
+      //only have one image to process and no recombining
+      sub_image_size = image_height;
       sub_images.push_back(orig_image_mat);
       rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
     }
 
 
     // create tensorflow tensor directly from in-memory opencv mat
-    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), image_height, image_height, input_channels}));
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), sub_image_size, sub_image_size, input_channels}));
     auto input_tensor_mapped = input_tensor.tensor<float, 4>();
     for (std::size_t sub_index = 0; sub_index < sub_images.size(); sub_index++) {
       std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
@@ -727,13 +850,97 @@ int main(int argc, char *argv[]) {
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
     switch (sub_images.size()) {
+      case 8: {
+        resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_size, sub_image_size);
+        if (!resize_status.ok()) {
+          LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
+          return -1;
+        }
+        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
+        auto output_array8 = resized_outputs[0].flat<float>().data();
+        auto *float_output_array8 = static_cast<float *>(output_array8);
+
+        // need some temporary data structures
+        auto *merged_top_quad = new float[sub_image_size * leftImage.cols * output_classes];
+        auto *merged_bottom_quad = new float[sub_image_size * leftImage.cols * output_classes];
+        auto *merged_left = new float[leftImage.cols * leftImage.rows * output_classes];
+        auto *merged_right = new float[rightImage.cols * rightImage.rows * output_classes];
+
+        // now have 8 dimensional array of size sub_image_size x sub_image_size x num_classes
+        // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
+        // (  top    vt  bottom ) hz (  top    vt  bottom )
+        //         left           hz           right
+        hive_segmentation::hz_merge(float_output_array8,
+                                    0,
+                                    1,
+                                    sub_image_size,
+                                    sub_image_size,
+                                    output_classes,
+                                    merged_top_quad,
+                                    sub_image_size,
+                                    leftImage.cols);
+
+        hive_segmentation::hz_merge(float_output_array8,
+                                    2,
+                                    3,
+                                    sub_image_size,
+                                    sub_image_size,
+                                    output_classes,
+                                    merged_bottom_quad,
+                                    sub_image_size,
+                                    leftImage.cols);
+
+        hive_segmentation::hz_merge(float_output_array8,
+                                    4,
+                                    5,
+                                    sub_image_size,
+                                    sub_image_size,
+                                    output_classes,
+                                    merged_top_quad,
+                                    sub_image_size,
+                                    leftImage.cols);
+
+        hive_segmentation::hz_merge(float_output_array8,
+                                    6,
+                                    7,
+                                    sub_image_size,
+                                    sub_image_size,
+                                    output_classes,
+                                    merged_bottom_quad,
+                                    sub_image_size,
+                                    leftImage.cols);
+
+        hive_segmentation::vert_merge(merged_top_quad,
+                                    merged_bottom_quad,
+                                    sub_image_size,
+                                    rightImage.cols,
+                                    output_classes,
+                                    merged_right,
+                                    rightImage.rows,
+                                    rightImage.cols);
+
+        hive_segmentation::hz_merge(merged_left,
+                                    merged_right,
+                                    rightImage.rows,
+                                    rightImage.cols,
+                                    output_classes,
+                                    merged_output_classes,
+                                    image_height,
+                                    image_width);
+
+        delete[] merged_top_quad;
+        delete[] merged_bottom_quad;
+        delete[] merged_left;
+        delete[] merged_right;
+        break;
+      }
       case 2: {
         resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, leftImage.rows, leftImage.cols);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing dual output from model failed: " << resize_status;
           return -1;
         }
-        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
+        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
         auto output_array2 = resized_outputs[0].flat<float>().data();
         auto *float_output_array2 = static_cast<float *>(output_array2);
         std::cout << "Merging output classes" << std::endl;
@@ -746,7 +953,6 @@ int main(int argc, char *argv[]) {
                                     merged_output_classes,
                                     image_height,
                                     image_width);
-
         break;
       }
       case 1: {
@@ -766,13 +972,16 @@ int main(int argc, char *argv[]) {
               return -1;
     }
 
+
     // resize model output as percent of actual image dimensions if necessary
     auto final_image_height = static_cast<uint32>(scale_percent * static_cast<double>(image_height) / 100);
     auto final_image_width = static_cast<uint32>(scale_percent * static_cast<double>(image_width) / 100);
     // resize original image to use for rgb colors (first three channels) in output tiff file
     cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
     if (scale_percent != 100) {
+      // TODO dwh: resize tensor merged output here too--or integrate into above?? by using final_image* above
       std::cout << "Model results resized to " << final_image_width << " width x " << final_image_height << " height for output" << std::endl;
+
       // resize original image for scaled pixel values to use in tiff output
       cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
       std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
@@ -783,12 +992,17 @@ int main(int argc, char *argv[]) {
       resized_mat = orig_image_mat;
     }
 
+
     // merge and save data into tiff file
     if (image_result_filename.empty()){
       image_result_filename = image_filename.substr(0, image_filename.find_last_of('.'))+".tif";
       std::cout << "Using input filename " << image_filename << " as basis for output file name: " << image_result_filename << std::endl;
     }
     hive_segmentation::write_tiff_file(merged_output_classes, resized_mat, final_image_height, final_image_width, input_channels, output_classes, image_result_filename);
+
+
+    // cleanup
+    delete[] merged_output_classes;
 
   } // end while loop for image filenames
 
