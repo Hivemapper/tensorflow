@@ -728,23 +728,21 @@ int main(int argc, char *argv[]) {
 
 
     // break into pieces if input image is not square
-    int sub_image_height = image_height;
-    int sub_image_width = image_width;
     std::vector<cv::Mat> sub_images {};
     std::vector<cv::Rect> rectangles {};
     if (image_height > static_cast<int>(float(image_width) * input_aspect_ratio)) {
       LOG(ERROR) << "Error: Image height is proportionally greater than image width";
       return -1;
     }
-    cv::Mat leftImage(image_height, image_height, CV_8UC3);
-    cv::Mat rightImage(image_height, image_height, CV_8UC3);
-    if(static_cast<double>(image_height) != static_cast<double>(image_width) * input_aspect_ratio) {
-  //    (image_width * input_height) != (image_height * input_width)) {
+    int sub_image_height = image_height;
+    int sub_image_width = static_cast<int>(static_cast<float>(image_height) / input_aspect_ratio);
+    cv::Mat leftImage(sub_image_width, sub_image_height, CV_8UC3);
+    cv::Mat rightImage(sub_image_width, sub_image_height, CV_8UC3);
+    if (image_height != static_cast<int>(static_cast<float>(image_width) * input_aspect_ratio)) {
       if (static_cast<double>(image_width) * input_aspect_ratio > static_cast<double>(2 * image_height)){
         LOG(ERROR) << "Error: Insufficient overlap for a two image method--image width is greater than twice height";
         return -1;
       }
-      // TODO dwh: fix the following for non-square input
       // Setup a rectangle to define square sub-region on left side of image
       auto leftROI = cv::Rect(0, 0, leftImage.cols, leftImage.rows);
       //    std::cout << "Left " << leftROI << std::endl;
@@ -758,10 +756,8 @@ int main(int argc, char *argv[]) {
       rightImage = orig_image_mat(rightROI);
 
       if (do_quads) {
-        // TODO dwh: generalize for non-square model input
         sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
-        // change this
-        sub_image_width = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_width);
+        sub_image_width = static_cast<int>(static_cast<float>(sub_image_height) / input_aspect_ratio);
         std::cout << "Breaking up image into two quads of subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
         // TODO dwh: make roi and then use them to make sub images
         sub_images.push_back(leftImage(cv::Rect(0, 0, sub_image_width, sub_image_height)));
@@ -973,8 +969,8 @@ int main(int argc, char *argv[]) {
           LOG(ERROR) << "Error: Resizing single output from model failed: " << resize_status;
           return -1;
         }
-        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for output" << std::endl;
-        // TODO dwh: what to do here to put directly into merged output--test this
+        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
+        // TODO dwh: what to do here to put directly into merged output--test this with square input
         auto output_array1 = resized_outputs[0].flat<float>().data();
         auto *float_output_array1 = static_cast<float *>(output_array1);
         merged_output_classes = float_output_array1;
@@ -988,19 +984,32 @@ int main(int argc, char *argv[]) {
     // resize model output as percent of actual image dimensions if necessary
     auto final_image_height = static_cast<uint32>(scale_percent * static_cast<double>(image_height) / 100);
     auto final_image_width = static_cast<uint32>(scale_percent * static_cast<double>(image_width) / 100);
+//    auto *final_output_classes = new float[final_image_height * final_image_width * output_classes];
+    std::vector<Tensor> final_outputs {};
     // resize original image to use for rgb colors (first three channels) in output tiff file
     cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
     if (scale_percent != 100) {
-      // TODO dwh: resize tensor merged output here too--or integrate into above?? by using final_image* above
-      std::cout << "Model results resized to " << final_image_width << " width x " << final_image_height << " height for output" << std::endl;
-
-      // resize original image for scaled pixel values to use in tiff output
-      cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
-      std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
-      std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
-      assert(resized_mat.cols == final_image_width);
-      assert(resized_mat.rows == final_image_height);
+      std::cout << "Scaling not implemented" << std::endl;
+      return -1
+//      std::cout << "Model results resized to " << final_image_width << " width x " << final_image_height << " height for output" << std::endl;
+////      resize_status = ::hive_segmentation::ResizeTensor(resized_outputs[0], &final_outputs, final_image_height, final_image_width);
+////      if (!resize_status.ok()) {
+////        LOG(ERROR) << "Error: Resizing final output by scaling factor failed: " << resize_status;
+////        return -1;
+////      }
+//////      auto const &final_output = final_outputs[0];
+//////      auto final_output_array = final_outputs[0].flat<float>().data();
+//////      final_output_classes = static_cast<float *>(final_output_array);
+////      final_output_classes = static_cast<float *>(final_outputs[0].flat<float>().data());
+//      std::cout << "Final Model results resized to " << (final_outputs[0]).shape() << " for output" << std::endl;
+//      // resize original image for scaled pixel values to use in tiff output
+//      cv::resize(orig_image_mat, resized_mat, cv::Size(final_image_width, final_image_height));
+//      std::cout << "Merged output Image x width " << resized_mat.cols << std::endl;
+//      std::cout << "Merged output Image y height " << resized_mat.rows << std::endl;
+//      assert(resized_mat.cols == final_image_width);
+//      assert(resized_mat.rows == final_image_height);
     } else {
+//      final_output_classes = merged_output_classes;
       resized_mat = orig_image_mat;
     }
 
@@ -1015,6 +1024,7 @@ int main(int argc, char *argv[]) {
 
     // cleanup
     delete[] merged_output_classes;
+//    delete[] final_output_classes;
 
   } // end while loop for image filenames
 
