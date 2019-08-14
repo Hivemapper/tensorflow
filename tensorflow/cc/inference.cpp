@@ -518,7 +518,7 @@ int write_tiff_file(const float *merged_output_classes,
                     const int final_image_width,
                     const int input_channels,
                     const int output_classes,
-                    const string image_result_filename) {
+                    const string& image_result_filename) {
   auto output_channels = output_classes + input_channels;
   std::cout << "Building TIFF of size " << final_image_width << " X " << final_image_height << " X " << output_channels << std::endl;
   std::cout << "Saving Tiff to " << image_result_filename << std::endl;
@@ -539,9 +539,8 @@ int write_tiff_file(const float *merged_output_classes,
   uint8_t arr[final_image_width * output_channels];
   for (std::size_t i=0; i<final_image_height; i++)  {
     float scale_pixel[3] = {1.f, 1.f, 1.f};
-    cv::Vec3b pixel_value;
     for (std::size_t j=0; j<final_image_width; j++) {
-      pixel_value = resized_mat.at<cv::Vec3b>(i, j);
+      auto pixel_value = resized_mat.at<cv::Vec3b>(i, j);
       std::vector<double> segmentation_floats {};
       float segmentation_value = 0;
       for (std::size_t k=0; k<3; k++) {
@@ -562,18 +561,18 @@ int write_tiff_file(const float *merged_output_classes,
       //      std::cout << "Raw pixel " << i << " " << j << " ";
       //      for (auto &value : segmentation_floats) std::cout << value << " ";
       //      std::cout << std::endl;
-      double normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
+      auto normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
       for (auto &value : segmentation_floats) value -= normalization_min;
       auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
-      double normalization_range = normalization_max - normalization_min;
+      auto normalization_range = normalization_max - normalization_min;
       normalization_range = (normalization_range == 0)? 1. : normalization_range;
       //      std::cout << "Range pixel " << i << " " << j << " min is " << normalization_min << " and max is " << normalization_max << " for total range " << normalization_range << std::endl;
       for (auto &value : segmentation_floats) value /= normalization_range;
       // make into probability using sum of all values in pixel classes
-      double normalization_sum = 0;
+      float normalization_sum = 0;
       for (auto value : segmentation_floats) normalization_sum += value;
       // if sum is zero then all classes are equally possible--note argmax takes first match which will be unknown class
-      normalization_sum = (normalization_sum == 0)? 1. / static_cast<double>(output_classes) : normalization_sum;
+      normalization_sum = (normalization_sum == 0)? 1. / static_cast<float>(output_classes) : normalization_sum;
       for (auto &value : segmentation_floats) value /= normalization_sum;
       //      std::cout << "Sum is " << normalization_sum << std::endl;
       //      std::cout << "Normalized pixel " << i << " " << j << " ";
@@ -581,7 +580,7 @@ int write_tiff_file(const float *merged_output_classes,
       //      std::cout << std::endl;
       for (int s=0; s<output_classes; s++) {
         // scale to 8 bit pixel value--note may not sum to 1 now so not strictly a probability anymore
-        arr[j*output_channels + input_channels + s] = uint8_t(std::round(segmentation_floats[s] * 255.f));
+        arr[j*output_channels + input_channels + s] = static_cast<uint8_t>(std::round(segmentation_floats[s] * 255.f));
         //        std::cout << "Final pixel " << i << " " << j << " " << s << " " << std::round(segmentation_floats[s] * 255.f) << std::endl;
       }
     }
