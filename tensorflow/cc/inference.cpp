@@ -307,6 +307,28 @@ int load_images_from_file(const string &image_filename,
   return 0;
 }
 
+float *blender_array(int num_vals, int sub_size) {
+  int offset = num_vals - sub_size;
+  int overlap = (2 * sub_size) - num_vals;
+  assert(overlap >= 0);
+  std::cout << "Making blending array of size " << num_vals << ", with offset " << offset << ", overlap " << overlap << " and sub_size " << sub_size << std::endl;
+  float *blender = new float[num_vals] {};
+  for (std::size_t i=0; i<num_vals; i++) {
+    if (i <= offset) {
+      // only first sub image will be used
+      blender[i] = 0;
+    } else if (i > sub_size) {
+      // only second sub image will be used
+      blender[i] = 1;
+    } else {
+      // two sub images will be combined by a linear scale
+      blender[i] = float(i - offset) / float(overlap);
+//      std::cout << i << " is " << blender[i] << std::endl;
+    }
+  }
+  return blender;
+}
+
 void hz_merge(float *results,
               const int first_image,
               const int second_image,
@@ -316,25 +338,9 @@ void hz_merge(float *results,
               float *merged_output,
               const int target_y,
               const int target_x) {
-  int overlap = (2 * num_x) - target_x;
   assert(num_y == target_y);
-  assert(overlap >= 0);
   int offset = target_x - num_x;
-  float x_blending_factor[target_x] {};
-  std::cout << "Making horizontal blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  for (std::size_t i=0; i<target_x; i++) {
-    if (i <= offset) {
-      // only first sub image will be used
-      x_blending_factor[i] = 0;
-    } else if (i > num_x) {
-      // only second sub image will be used
-      x_blending_factor[i] = 1;
-    } else {
-      // two sub images will be combined by a linear scale
-      x_blending_factor[i] = float(i - offset) / float(overlap);
-//      std::cout << i << " is " << x_blending_factor[i] << std::endl;
-    }
-  }
+  auto x_blending_factor = blender_array(target_x, num_x);
 
   std::cout << "Performing the merge" << std::endl;
   for (auto i = 0; i < target_x; i++) {
@@ -368,25 +374,9 @@ void hz_merge(const float *first_image,
               float *merged_output,
               const int target_y,
               const int target_x) {
-  int overlap = (2 * num_x) - target_x;
   assert(num_y == target_y);
-  assert(overlap >= 0);
   int offset = target_x - num_x;
-  float x_blending_factor[target_x] {};
-  std::cout << "Making horizontal blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  for (std::size_t i=0; i<target_x; i++) {
-    if (i <= offset) {
-      // only first sub image will be used
-      x_blending_factor[i] = 0;
-    } else if (i > num_x) {
-      // only second sub image will be used
-      x_blending_factor[i] = 1;
-    } else {
-      // two sub images will be combined by a linear scale
-      x_blending_factor[i] = float(i - offset) / float(overlap);
-//      std::cout << i << " is " << x_blending_factor[i] << std::endl;
-    }
-  }
+  auto x_blending_factor = blender_array(target_x, num_x);
 
   std::cout << "Performing the merge" << std::endl;
   for (auto i = 0; i < target_x; i++) {
@@ -420,25 +410,9 @@ void vert_merge(float *results,
                 float *merged_output,
                 const int target_y,
                 const int target_x) {
-  int overlap = (2 * num_y) - target_y;
   assert(num_x == target_x);
-  assert(overlap >= 0);
   int offset = target_y - num_y;
-  std::cout << "Making vertical blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  float y_blending_factor[target_y] {};
-  for (std::size_t j=0; j<target_y; j++) {
-    if (j <= offset) {
-      // only first sub image will be used
-      y_blending_factor[j] = 0;
-    } else if (j > num_y) {
-      // only second sub image will be used
-      y_blending_factor[j] = 1;
-    } else {
-      // two sub images will be combined by a linear scale
-      y_blending_factor[j] = float(j - offset) / float(overlap);
-      // std::cout << i << " is " << y_blending_factor[j] << std::endl;
-    }
-  }
+  auto y_blending_factor = blender_array(target_y, num_y);
 
   std::cout << "Performing the merge" << std::endl;
   for (auto i = 0; i < target_x; i++) {
@@ -471,25 +445,9 @@ void vert_merge(const float *first_image,
                 float *merged_output,
                 const int target_y,
                 const int target_x) {
-  int overlap = (2 * num_y) - target_y;
   assert(num_x == target_x);
-  assert(overlap >= 0);
   int offset = target_y - num_y;
-  std::cout << "Making vertical blending array with overlap " << overlap << " and offset " << offset << std::endl;
-  float y_blending_factor[target_y] {};
-  for (std::size_t j=0; j<target_y; j++) {
-    if (j <= offset) {
-      // only first sub image will be used
-      y_blending_factor[j] = 0;
-    } else if (j > num_y) {
-      // only second sub image will be used
-      y_blending_factor[j] = 1;
-    } else {
-      // two sub images will be combined by a linear scale
-      y_blending_factor[j] = float(j - offset) / float(overlap);
-      // std::cout << i << " is " << y_blending_factor[j] << std::endl;
-    }
-  }
+  auto y_blending_factor = blender_array(target_y, num_y);
 
   std::cout << "Performing the merge" << std::endl;
   for (auto i = 0; i < target_x; i++) {
