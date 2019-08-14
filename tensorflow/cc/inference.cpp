@@ -977,7 +977,7 @@ int main(int argc, char *argv[]) {
         break;
       }
       default: LOG(ERROR) << "Error: Invalid number of sub-images: " << sub_images.size();
-              return -1;
+        return -1;
     }
 
 
@@ -990,7 +990,7 @@ int main(int argc, char *argv[]) {
     cv::Mat resized_mat(final_image_width, final_image_height, CV_8UC3);
     if (scale_percent != 100) {
       std::cout << "Scaling not implemented" << std::endl;
-      return -1
+      return -1;
 //      std::cout << "Model results resized to " << final_image_width << " width x " << final_image_height << " height for output" << std::endl;
 ////      resize_status = ::hive_segmentation::ResizeTensor(resized_outputs[0], &final_outputs, final_image_height, final_image_width);
 ////      if (!resize_status.ok()) {
