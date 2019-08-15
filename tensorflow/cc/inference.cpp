@@ -335,6 +335,7 @@ float *blender_array(int num_vals, int sub_size) {
 // Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge horizontally.
 // num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
 // the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void hz_merge(float *results,
               const int first_image,
@@ -346,6 +347,8 @@ void hz_merge(float *results,
               const int target_y,
               const int target_x) {
   assert(num_y == target_y);
+  assert(results != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -376,6 +379,7 @@ void hz_merge(float *results,
 // Takes two image pointers corresponding to two images to merge horizontally.
 // num_y and num_x are the sizes of the source images and target_y and target_x are the size that
 // the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note this function does not reverse the indices when creating the merged image
 void hz_merge(const float *first_image,
               const float *second_image,
@@ -386,6 +390,9 @@ void hz_merge(const float *first_image,
               const int target_y,
               const int target_x) {
   assert(num_y == target_y);
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -415,6 +422,7 @@ void hz_merge(const float *first_image,
 // Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge vertically.
 // num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
 // the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void vert_merge(float *results,
                 const int first_image,
@@ -426,6 +434,8 @@ void vert_merge(float *results,
                 const int target_y,
                 const int target_x) {
   assert(num_x == target_x);
+  assert(results != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -455,6 +465,7 @@ void vert_merge(float *results,
 // Takes two image pointers corresponding to two images to merge vertically.
 // num_y and num_x are the sizes of the source images and target_y and target_x are the size that
 // the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note this function does not reverse the indices when creating the merged image
 void vert_merge(const float *first_image,
                 const float *second_image,
@@ -465,6 +476,9 @@ void vert_merge(const float *first_image,
                 const int target_y,
                 const int target_x) {
   assert(num_x == target_x);
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -491,12 +505,16 @@ void vert_merge(const float *first_image,
 
 // This takes two pointers to images and adds them together.  The two images must be the same size--num_y by num_x
 // and the output will be the same size as the input images.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
 void add_images(const float *first_image,
                 const float *second_image,
                 const int num_y,
                 const int num_x,
                 const int num_classes,
                 float *merged_output) {
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
   std::cout << "Performing the add" << std::endl;
   for (auto i = 0; i < num_x; i++) {
     for (auto j = 0; j < num_y; j++) {
@@ -798,7 +816,7 @@ int main(int argc, char *argv[]) {
 
     // create tensorflow tensor directly from in-memory opencv mat
     // TODO dwh: is height width order correct??
-    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), sub_image_width, sub_image_height, input_channels}));
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({static_cast<int>(sub_images.size()), sub_image_width, sub_image_height, input_channels}));
     auto input_tensor_mapped = input_tensor.tensor<float, 4>();
     for (std::size_t sub_index = 0; sub_index < sub_images.size(); sub_index++) {
       std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
@@ -851,7 +869,7 @@ int main(int argc, char *argv[]) {
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     auto *merged_output_classes = new float[image_height * image_width * output_classes];
-    float *dual_output_classes {};
+    float *dual_output_classes = nullptr;
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
     std::vector<Tensor> full_outputs {};
@@ -866,7 +884,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model dual results resized to " << (full_outputs[0]).shape() << " for merging" << std::endl;
-        auto *float_output_array10 = static_cast<float *>(full_outputs[0].flat<float>().data());
+        auto float_output_array10 = static_cast<float *>(full_outputs[0].flat<float>().data());
         hive_segmentation::hz_merge(float_output_array10,
                                     8,
                                     9,
@@ -885,7 +903,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model quad results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto *float_output_array8 = static_cast<float *>(resized_outputs[0].flat<float>().data());
+        auto float_output_array8 = static_cast<float *>(resized_outputs[0].flat<float>().data());
 
         // need some temporary data structures
         auto *merged_top_quad = new float[sub_image_height * leftImage.cols * output_classes];
@@ -1000,7 +1018,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto *float_output_array2 = static_cast<float *>(resized_outputs[0].flat<float>().data());
+        auto float_output_array2 = static_cast<float *>(resized_outputs[0].flat<float>().data());
         std::cout << "Merging output classes" << std::endl;
         hive_segmentation::hz_merge(float_output_array2,
                                     0,
@@ -1071,9 +1089,9 @@ int main(int argc, char *argv[]) {
 
     // cleanup
     delete[] merged_output_classes;
-    if (dual_output_classes ) {
-      delete[] dual_output_classes;
-    }
+    merged_output_classes = nullptr;
+    delete[] dual_output_classes;
+    dual_output_classes = nullptr;
 //    delete[] final_output_classes;
 
   } // end while loop for image filenames
