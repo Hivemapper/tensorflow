@@ -740,7 +740,8 @@ tf_cc_binary(
             "-lopencv_core",
             "-lopencv_highgui",
             "-lopencv_imgproc",
-            #            "-lopencv_imgcodecs",
+            # this is needed for deploy with opencv4, but fails local build with deb packages
+            "-lopencv_imgcodecs",
             "-ltiff",
         ],
     }),
