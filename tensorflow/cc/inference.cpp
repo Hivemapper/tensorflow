@@ -246,7 +246,7 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
 
 // Reads a model graph definition from disk, and creates a session object
 Status LoadGraph(const string &graph_file_name,
-                 std::unique_ptr<Session> *session,  // TODO non-const reference??
+                 std::unique_ptr<Session> *session,
                  string &input_layer, string &output_layer,
                  int32& input_batch_size, int32& input_width, int32& input_height, int32& input_channels) {
   GraphDef graph_def;
@@ -307,6 +307,9 @@ int load_images_from_file(const string &image_filename,
   return 0;
 }
 
+// This creates a linear array that has a flat zone, a linear ramp zone and a final flat zone
+// where the ramp is in the area where two images overlap and first and last flat areas are non-overlap areas.
+// The values range from 0 to 1 and define the proportions of classes in the two images that will be merged into the final image
 float *blender_array(int num_vals, int sub_size) {
   int offset = num_vals - sub_size;
   int overlap = (2 * sub_size) - num_vals;
@@ -329,6 +332,11 @@ float *blender_array(int num_vals, int sub_size) {
   return blender;
 }
 
+// Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge horizontally.
+// num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
+// the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+// Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void hz_merge(float *results,
               const int first_image,
               const int second_image,
@@ -339,6 +347,8 @@ void hz_merge(float *results,
               const int target_y,
               const int target_x) {
   assert(num_y == target_y);
+  assert(results != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -366,6 +376,11 @@ void hz_merge(float *results,
   }
 }
 
+// Takes two image pointers corresponding to two images to merge horizontally.
+// num_y and num_x are the sizes of the source images and target_y and target_x are the size that
+// the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+// Note this function does not reverse the indices when creating the merged image
 void hz_merge(const float *first_image,
               const float *second_image,
               const int num_y,
@@ -375,6 +390,9 @@ void hz_merge(const float *first_image,
               const int target_y,
               const int target_x) {
   assert(num_y == target_y);
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -401,6 +419,11 @@ void hz_merge(const float *first_image,
   }
 }
 
+// Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge vertically.
+// num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
+// the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+// Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void vert_merge(float *results,
                 const int first_image,
                 const int second_image,
@@ -411,6 +434,8 @@ void vert_merge(float *results,
                 const int target_y,
                 const int target_x) {
   assert(num_x == target_x);
+  assert(results != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -437,6 +462,11 @@ void vert_merge(float *results,
   }
 }
 
+// Takes two image pointers corresponding to two images to merge vertically.
+// num_y and num_x are the sizes of the source images and target_y and target_x are the size that
+// the combined image should be.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+// Note this function does not reverse the indices when creating the merged image
 void vert_merge(const float *first_image,
                 const float *second_image,
                 const int num_y,
@@ -446,6 +476,9 @@ void vert_merge(const float *first_image,
                 const int target_y,
                 const int target_x) {
   assert(num_x == target_x);
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -465,6 +498,32 @@ void vert_merge(const float *first_image,
           segmentation_value += y_blending_factor[j] * second_image[(i * num_y + (j - offset)) * num_classes + s];
         }
         merged_output[(i * target_y + j) * num_classes + s] = segmentation_value;
+      }
+    }
+  }
+}
+
+// This takes two pointers to images and adds them together.  The two images must be the same size--num_y by num_x
+// and the output will be the same size as the input images.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+void add_images(const float *first_image,
+                const float *second_image,
+                const int num_y,
+                const int num_x,
+                const int num_classes,
+                float *merged_output) {
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  assert(merged_output != nullptr);
+  std::cout << "Performing the add" << std::endl;
+  for (auto i = 0; i < num_x; i++) {
+    for (auto j = 0; j < num_y; j++) {
+      for (auto s = 0; s < num_classes; s++) {
+        float segmentation_value = 0;
+        // use both sub images in equal proportion
+        segmentation_value = 0.5f * first_image[(i * num_y + j) * num_classes + s];
+        segmentation_value += 0.5f * second_image[(i * num_y + j) * num_classes + s];
+        merged_output[(i * num_y + j) * num_classes + s] = segmentation_value;
       }
     }
   }
@@ -515,10 +574,6 @@ int write_tiff_file(const float *merged_output_classes,
 //          std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
       }
       // normalize classes to 0-1 float values
-      // TODO dwh: increase unknown class and decrease other classes as we near edge of image--50% at edge and 75% in corner??
-      //      std::cout << "Raw pixel " << i << " " << j << " ";
-      //      for (auto &value : segmentation_floats) std::cout << value << " ";
-      //      std::cout << std::endl;
       auto normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
       for (auto &value : segmentation_floats) value -= normalization_min;
       auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
@@ -577,11 +632,11 @@ int main(int argc, char *argv[]) {
   // optional output result filename defaults to imagename.tif but can be specified as an imagename or a file with a list of imagenames
   string image_result_filename;
   // the tensorflow graph name without the directory (root_dir below is prefixed to name)
-  string graph = "my_model.pb";
+  string graph = "segmentation_model.pb";
   string root_dir = "./";
 
   // some config
-  bool do_quads = false;
+  bool do_quads = true;
   float overlap_fraction = 1.1;
 
   // data structures to hold multiple image and result names in sequence order
@@ -603,12 +658,12 @@ int main(int argc, char *argv[]) {
 
   // check flags--Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
-    Flag("image", &image_filename, "full path image to be processed--mandatory"),
+    Flag("image", &image_filename, "full path image to be processed--no default and mandatory"),
     Flag("results", &image_result_filename, "full path processed image results--default is image filename with .tif extension"),
-    Flag("scale", &scale_percent, "percent to scale output results"),
-    Flag("graph", &graph, "graph to be executed"),
-    Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
-    Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up"),
+    Flag("scale", &scale_percent, "percent to scale output results--default is 100"),
+    Flag("graph", &graph, "graph to be executed--default is segmentation_model.pb"),
+    Flag("root_dir", &root_dir, "interpret graph file names relative to this directory--default is ./"),
+    Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up--default is true"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -733,6 +788,16 @@ int main(int argc, char *argv[]) {
         rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
         sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
         rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
+
+        std::cout << "Adding resized left and right subimages" << std::endl;
+        cv::Mat resizedLeft(sub_image_width, sub_image_height, CV_8UC3);
+        cv::resize(leftImage, resizedLeft, cv::Size(sub_image_width, sub_image_height));
+        sub_images.push_back(resizedLeft);
+        rectangles.push_back(leftROI);
+        cv::Mat resizedRight(sub_image_width, sub_image_height, CV_8UC3);
+        cv::resize(rightImage, resizedRight, cv::Size(sub_image_width, sub_image_height));
+        sub_images.push_back(resizedRight);
+        rectangles.push_back(rightROI);
       } else {
         sub_image_width = sub_image_height;
         std::cout << "Breaking up image into two subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
@@ -751,7 +816,7 @@ int main(int argc, char *argv[]) {
 
     // create tensorflow tensor directly from in-memory opencv mat
     // TODO dwh: is height width order correct??
-    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({int(sub_images.size()), sub_image_width, sub_image_height, input_channels}));
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({static_cast<int>(sub_images.size()), sub_image_width, sub_image_height, input_channels}));
     auto input_tensor_mapped = input_tensor.tensor<float, 4>();
     for (std::size_t sub_index = 0; sub_index < sub_images.size(); sub_index++) {
       std::cout << "Making tensor for sub image " << sub_index << " of " << sub_images.size() << std::endl;
@@ -800,21 +865,45 @@ int main(int argc, char *argv[]) {
     output_classes = uint(output.shape().dim_size(3));
     std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
 
+
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     auto *merged_output_classes = new float[image_height * image_width * output_classes];
+    float *dual_output_classes = nullptr;
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
+    std::vector<Tensor> full_outputs {};
     switch (sub_images.size()) {
+      case 10: {
+        // make dual output merged classes for later combining with quads
+        dual_output_classes = new float[image_height * image_width * output_classes];
+        // don't really need to resize the entire output, but for simplicity we do
+        resize_status = ::hive_segmentation::ResizeTensor(output, &full_outputs, leftImage.rows, leftImage.cols);
+        if (!resize_status.ok()) {
+          LOG(ERROR) << "Error: Resizing dual output from model failed: " << resize_status;
+          return -1;
+        }
+        std::cout << "Model dual results resized to " << (full_outputs[0]).shape() << " for merging" << std::endl;
+        auto float_output_array10 = static_cast<float *>(full_outputs[0].flat<float>().data());
+        hive_segmentation::hz_merge(float_output_array10,
+                                    8,
+                                    9,
+                                    leftImage.rows,
+                                    leftImage.cols,
+                                    output_classes,
+                                    dual_output_classes,
+                                    image_height,
+                                    image_width);
+        // no break here because want to also run the case 8 when we have 10
+      }
       case 8: {
         resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_height, sub_image_width);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
           return -1;
         }
-        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto output_array8 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array8 = static_cast<float *>(output_array8);
+        std::cout << "Model quad results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
+        auto float_output_array8 = static_cast<float *>(resized_outputs[0].flat<float>().data());
 
         // need some temporary data structures
         auto *merged_top_quad = new float[sub_image_height * leftImage.cols * output_classes];
@@ -876,22 +965,45 @@ int main(int argc, char *argv[]) {
                                     leftImage.cols);
 
         hive_segmentation::vert_merge(merged_top_quad,
-                                    merged_bottom_quad,
-                                    sub_image_height,
-                                    rightImage.cols,
-                                    output_classes,
-                                    merged_right,
-                                    rightImage.rows,
-                                    rightImage.cols);
+                                      merged_bottom_quad,
+                                      sub_image_height,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols);
 
-        hive_segmentation::hz_merge(merged_left,
-                                    merged_right,
-                                    rightImage.rows,
-                                    rightImage.cols,
-                                    output_classes,
-                                    merged_output_classes,
-                                    image_height,
-                                    image_width);
+        // test for 10 classes (quads and dual) and do merge accordingly
+        if (dual_output_classes) {
+          std::cout << "Combining Dual and Quad classes" << std::endl;
+          auto *merged_quad_classes = new float[image_height * image_width * output_classes];
+          hive_segmentation::hz_merge(merged_left,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_quad_classes,
+                                      image_height,
+                                      image_width);
+          // then combine merged_quad_classes and dual_output_classes
+          hive_segmentation::add_images(merged_quad_classes,
+                                        dual_output_classes,
+                                        image_height,
+                                        image_width,
+                                        output_classes,
+                                        merged_output_classes);
+          delete [] merged_quad_classes;
+        } else {
+          // just merge the left and right from the quads
+          hive_segmentation::hz_merge(merged_left,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_output_classes,
+                                      image_height,
+                                      image_width);
+        }
 
         delete[] merged_top_quad;
         delete[] merged_bottom_quad;
@@ -906,8 +1018,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto output_array2 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array2 = static_cast<float *>(output_array2);
+        auto float_output_array2 = static_cast<float *>(resized_outputs[0].flat<float>().data());
         std::cout << "Merging output classes" << std::endl;
         hive_segmentation::hz_merge(float_output_array2,
                                     0,
@@ -927,10 +1038,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        // TODO dwh: what to do here to put directly into merged output--test this with square input
-        auto output_array1 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array1 = static_cast<float *>(output_array1);
-        merged_output_classes = float_output_array1;
+        merged_output_classes = static_cast<float *>(resized_outputs[0].flat<float>().data());
         break;
       }
       default: LOG(ERROR) << "Error: Invalid number of sub-images: " << sub_images.size();
@@ -981,6 +1089,9 @@ int main(int argc, char *argv[]) {
 
     // cleanup
     delete[] merged_output_classes;
+    merged_output_classes = nullptr;
+    delete[] dual_output_classes;
+    dual_output_classes = nullptr;
 //    delete[] final_output_classes;
 
   } // end while loop for image filenames
