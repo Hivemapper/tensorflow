@@ -632,11 +632,11 @@ int main(int argc, char *argv[]) {
   // optional output result filename defaults to imagename.tif but can be specified as an imagename or a file with a list of imagenames
   string image_result_filename;
   // the tensorflow graph name without the directory (root_dir below is prefixed to name)
-  string graph = "my_model.pb";
+  string graph = "segmentation_model.pb";
   string root_dir = "./";
 
   // some config
-  bool do_quads = false;
+  bool do_quads = true;
   float overlap_fraction = 1.1;
 
   // data structures to hold multiple image and result names in sequence order
@@ -658,12 +658,12 @@ int main(int argc, char *argv[]) {
 
   // check flags--Note that all of these types must be tensorflow types to work with Flag
   std::vector<Flag> flag_list = {
-    Flag("image", &image_filename, "full path image to be processed--mandatory"),
+    Flag("image", &image_filename, "full path image to be processed--no default and mandatory"),
     Flag("results", &image_result_filename, "full path processed image results--default is image filename with .tif extension"),
-    Flag("scale", &scale_percent, "percent to scale output results"),
-    Flag("graph", &graph, "graph to be executed"),
-    Flag("root_dir", &root_dir, "interpret graph file names relative to this directory"),
-    Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up"),
+    Flag("scale", &scale_percent, "percent to scale output results--default is 100"),
+    Flag("graph", &graph, "graph to be executed--default is segmentation_model.pb"),
+    Flag("root_dir", &root_dir, "interpret graph file names relative to this directory--default is ./"),
+    Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up--default is true"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
