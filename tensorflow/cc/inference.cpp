@@ -470,6 +470,26 @@ void vert_merge(const float *first_image,
   }
 }
 
+void add_images(const float *first_image,
+                const float *second_image,
+                const int num_y,
+                const int num_x,
+                const int num_classes,
+                float *merged_output) {
+  std::cout << "Performing the add" << std::endl;
+  for (auto i = 0; i < num_x; i++) {
+    for (auto j = 0; j < num_y; j++) {
+      for (auto s = 0; s < num_classes; s++) {
+        float segmentation_value = 0;
+        // use both sub images in equal proportion
+        segmentation_value = 0.5f * first_image[(i * num_y + j) * num_classes + s];
+        segmentation_value += 0.5f * second_image[(i * num_y + j) * num_classes + s];
+        merged_output[(i * num_y + j) * num_classes + s] = segmentation_value;
+      }
+    }
+  }
+}
+
 int write_tiff_file(const float *merged_output_classes,
                     ::cv::Mat resized_mat,
                     const int final_image_height,
@@ -733,6 +753,16 @@ int main(int argc, char *argv[]) {
         rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
         sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
         rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
+
+        std::cout << "Adding resized left and right subimages" << std::endl;
+        cv::Mat resizedLeft(sub_image_width, sub_image_height, CV_8UC3);
+        cv::resize(leftImage, resizedLeft, cv::Size(sub_image_width, sub_image_height));
+        sub_images.push_back(resizedLeft);
+        rectangles.push_back(leftROI);
+        cv::Mat resizedRight(sub_image_width, sub_image_height, CV_8UC3);
+        cv::resize(rightImage, resizedRight, cv::Size(sub_image_width, sub_image_height));
+        sub_images.push_back(resizedRight);
+        rectangles.push_back(rightROI);
       } else {
         sub_image_width = sub_image_height;
         std::cout << "Breaking up image into two subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
@@ -800,21 +830,45 @@ int main(int argc, char *argv[]) {
     output_classes = uint(output.shape().dim_size(3));
     std::cout << "Output shape is " << output.shape() << " with " << output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
 
+
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     auto *merged_output_classes = new float[image_height * image_width * output_classes];
+    float *dual_output_classes {};
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
+    std::vector<Tensor> full_outputs {};
     switch (sub_images.size()) {
+      case 10: {
+        // make dual output merged classes for later combining with quads
+        dual_output_classes = new float[image_height * image_width * output_classes];
+        // don't really need to resize the entire output, but for simplicity we do
+        resize_status = ::hive_segmentation::ResizeTensor(output, &full_outputs, leftImage.rows, leftImage.cols);
+        if (!resize_status.ok()) {
+          LOG(ERROR) << "Error: Resizing dual output from model failed: " << resize_status;
+          return -1;
+        }
+        std::cout << "Model dual results resized to " << (full_outputs[0]).shape() << " for merging" << std::endl;
+        auto *float_output_array10 = static_cast<float *>(full_outputs[0].flat<float>().data());
+        hive_segmentation::hz_merge(float_output_array10,
+                                    8,
+                                    9,
+                                    leftImage.rows,
+                                    leftImage.cols,
+                                    output_classes,
+                                    dual_output_classes,
+                                    image_height,
+                                    image_width);
+        // no break here because want to also run the case 8 when we have 10
+      }
       case 8: {
         resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_height, sub_image_width);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
           return -1;
         }
-        std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto output_array8 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array8 = static_cast<float *>(output_array8);
+        std::cout << "Model quad results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
+        auto *float_output_array8 = static_cast<float *>(resized_outputs[0].flat<float>().data());
 
         // need some temporary data structures
         auto *merged_top_quad = new float[sub_image_height * leftImage.cols * output_classes];
@@ -876,22 +930,45 @@ int main(int argc, char *argv[]) {
                                     leftImage.cols);
 
         hive_segmentation::vert_merge(merged_top_quad,
-                                    merged_bottom_quad,
-                                    sub_image_height,
-                                    rightImage.cols,
-                                    output_classes,
-                                    merged_right,
-                                    rightImage.rows,
-                                    rightImage.cols);
+                                      merged_bottom_quad,
+                                      sub_image_height,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols);
 
-        hive_segmentation::hz_merge(merged_left,
-                                    merged_right,
-                                    rightImage.rows,
-                                    rightImage.cols,
-                                    output_classes,
-                                    merged_output_classes,
-                                    image_height,
-                                    image_width);
+        // test for 10 classes (quads and dual) and do merge accordingly
+        if (dual_output_classes) {
+          std::cout << "Combining Dual and Quad classes" << std::endl;
+          auto *merged_quad_classes = new float[image_height * image_width * output_classes];
+          hive_segmentation::hz_merge(merged_left,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_quad_classes,
+                                      image_height,
+                                      image_width);
+          // then combine merged_quad_classes and dual_output_classes
+          hive_segmentation::add_images(merged_quad_classes,
+                                        dual_output_classes,
+                                        image_height,
+                                        image_width,
+                                        output_classes,
+                                        merged_output_classes);
+          delete [] merged_quad_classes;
+        } else {
+          // just merge the left and right from the quads
+          hive_segmentation::hz_merge(merged_left,
+                                      merged_right,
+                                      rightImage.rows,
+                                      rightImage.cols,
+                                      output_classes,
+                                      merged_output_classes,
+                                      image_height,
+                                      image_width);
+        }
 
         delete[] merged_top_quad;
         delete[] merged_bottom_quad;
@@ -906,8 +983,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        auto output_array2 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array2 = static_cast<float *>(output_array2);
+        auto *float_output_array2 = static_cast<float *>(resized_outputs[0].flat<float>().data());
         std::cout << "Merging output classes" << std::endl;
         hive_segmentation::hz_merge(float_output_array2,
                                     0,
@@ -927,10 +1003,7 @@ int main(int argc, char *argv[]) {
           return -1;
         }
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
-        // TODO dwh: what to do here to put directly into merged output--test this with square input
-        auto output_array1 = resized_outputs[0].flat<float>().data();
-        auto *float_output_array1 = static_cast<float *>(output_array1);
-        merged_output_classes = float_output_array1;
+        merged_output_classes = static_cast<float *>(resized_outputs[0].flat<float>().data());
         break;
       }
       default: LOG(ERROR) << "Error: Invalid number of sub-images: " << sub_images.size();
@@ -981,6 +1054,9 @@ int main(int argc, char *argv[]) {
 
     // cleanup
     delete[] merged_output_classes;
+    if (dual_output_classes ) {
+      delete[] dual_output_classes;
+    }
 //    delete[] final_output_classes;
 
   } // end while loop for image filenames
