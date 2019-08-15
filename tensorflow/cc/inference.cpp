@@ -246,7 +246,7 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
 
 // Reads a model graph definition from disk, and creates a session object
 Status LoadGraph(const string &graph_file_name,
-                 std::unique_ptr<Session> *session,  // TODO non-const reference??
+                 std::unique_ptr<Session> *session,
                  string &input_layer, string &output_layer,
                  int32& input_batch_size, int32& input_width, int32& input_height, int32& input_channels) {
   GraphDef graph_def;
@@ -307,6 +307,9 @@ int load_images_from_file(const string &image_filename,
   return 0;
 }
 
+// This creates a linear array that has a flat zone, a linear ramp zone and a final flat zone
+// where the ramp is in the area where two images overlap and first and last flat areas are non-overlap areas.
+// The values range from 0 to 1 and define the proportions of classes in the two images that will be merged into the final image
 float *blender_array(int num_vals, int sub_size) {
   int offset = num_vals - sub_size;
   int overlap = (2 * sub_size) - num_vals;
@@ -329,6 +332,10 @@ float *blender_array(int num_vals, int sub_size) {
   return blender;
 }
 
+// Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge horizontally.
+// num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
+// the combined image should be.
+// Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void hz_merge(float *results,
               const int first_image,
               const int second_image,
@@ -366,6 +373,10 @@ void hz_merge(float *results,
   }
 }
 
+// Takes two image pointers corresponding to two images to merge horizontally.
+// num_y and num_x are the sizes of the source images and target_y and target_x are the size that
+// the combined image should be.
+// Note this function does not reverse the indices when creating the merged image
 void hz_merge(const float *first_image,
               const float *second_image,
               const int num_y,
@@ -401,6 +412,10 @@ void hz_merge(const float *first_image,
   }
 }
 
+// Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge vertically.
+// num_y and num_x are the sizes of the images in the tensorflow data and target_y and target_x are the size that
+// the combined image should be.
+// Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
 void vert_merge(float *results,
                 const int first_image,
                 const int second_image,
@@ -437,6 +452,10 @@ void vert_merge(float *results,
   }
 }
 
+// Takes two image pointers corresponding to two images to merge vertically.
+// num_y and num_x are the sizes of the source images and target_y and target_x are the size that
+// the combined image should be.
+// Note this function does not reverse the indices when creating the merged image
 void vert_merge(const float *first_image,
                 const float *second_image,
                 const int num_y,
@@ -470,6 +489,8 @@ void vert_merge(const float *first_image,
   }
 }
 
+// This takes two pointers to images and adds them together.  The two images must be the same size--num_y by num_x
+// and the output will be the same size as the input images.
 void add_images(const float *first_image,
                 const float *second_image,
                 const int num_y,
@@ -535,10 +556,6 @@ int write_tiff_file(const float *merged_output_classes,
 //          std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
       }
       // normalize classes to 0-1 float values
-      // TODO dwh: increase unknown class and decrease other classes as we near edge of image--50% at edge and 75% in corner??
-      //      std::cout << "Raw pixel " << i << " " << j << " ";
-      //      for (auto &value : segmentation_floats) std::cout << value << " ";
-      //      std::cout << std::endl;
       auto normalization_min = *std::min_element(segmentation_floats.begin(), segmentation_floats.end());
       for (auto &value : segmentation_floats) value -= normalization_min;
       auto normalization_max = *std::max_element(segmentation_floats.begin(), segmentation_floats.end());
