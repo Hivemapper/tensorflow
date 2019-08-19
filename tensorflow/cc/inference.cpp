@@ -31,6 +31,7 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
+#include "tensorflow/core/graph/default_device.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/core/status.h"
@@ -259,7 +260,26 @@ Status LoadGraph(const string &graph_file_name,
     return tensorflow::errors::FailedPrecondition("Failed to parse compute graph at '", graph_file_name, "'");
   }
 
+  // TODO dwh: not the following code should work but there is a bug that breaks it in tensorflow
+  // so we need to use a setenv("CUDA_VISIBLE_DEVICES", "", 1) command instead which is done in main
+//  tensorflow::SessionOptions options;
+////
+//  tensorflow::ConfigProto* config = &options.config;
+////// disabled GPU entirely
+//  (*config->mutable_device_count())["GPU"] = 0;
+////// place nodes somewhere
+//  config->set_allow_soft_placement(true);
+//
+////  tensorflow::graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+//  tensorflow::graph::SetDefaultDevice("/cpu:0", &graph_def);
+//
+////  auto session_options = tensorflow::SessionOptions();
+////  std::cout << "Initial  visible_device_list : " << session_options.config.gpu_options().visible_device_list() << std::endl;
+//
+//  session->reset(NewSession(options));
+
   session->reset(NewSession(SessionOptions()));
+
   Status session_create_status = (*session)->Create(graph_def);
   return session_create_status;
 }
@@ -637,7 +657,9 @@ int main(int argc, char *argv[]) {
 
   // some config
   bool do_quads = true;
-  float overlap_fraction = 1.1;
+//  float overlap_fraction = 1.1;
+  int overlap_pixels = 32;
+  bool use_gpu = false;
 
   // data structures to hold multiple image and result names in sequence order
   std::vector<std::string> bulk_images {};
@@ -660,10 +682,15 @@ int main(int argc, char *argv[]) {
   std::vector<Flag> flag_list = {
     Flag("image", &image_filename, "full path image to be processed--no default and mandatory"),
     Flag("results", &image_result_filename, "full path processed image results--default is image filename with .tif extension"),
+    // TODO dwh: scale is not implemented yet--easiest is to scale first, but this requires running inference on all scales,
+    // alternative is to input all scales as a list and then output multiple scales at the end which requires interpolating
+    // the float array.
     Flag("scale", &scale_percent, "percent to scale output results--default is 100"),
     Flag("graph", &graph, "graph to be executed--default is segmentation_model.pb"),
     Flag("root_dir", &root_dir, "interpret graph file names relative to this directory--default is ./"),
     Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up--default is true"),
+    // TODO dwh: we could set this to an integer to indicate which gpu to use if there are more than one and -1 to disable??
+    Flag("use_gpu", &use_gpu, "use gpu--default is false"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -683,7 +710,9 @@ int main(int argc, char *argv[]) {
 
   // First we load and initialize the model.
   std::unique_ptr<tensorflow::Session> session;
-  // TODO dwh: use gpu for session if available
+  if (!use_gpu) {
+    setenv("CUDA_VISIBLE_DEVICES", "", 1);
+  }
   std::cout << "Set up session" << std::endl;
   string graph_path = tensorflow::io::JoinPath(root_dir, graph);
   Status load_graph_status = ::hive_segmentation::LoadGraph(graph_path, &session, input_layer, output_layer, input_batch_size, input_width, input_height, input_channels);
@@ -768,7 +797,8 @@ int main(int argc, char *argv[]) {
       rightImage = orig_image_mat(rightROI);
 
       if (do_quads) {
-        sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
+        sub_image_height = std::max(overlap_pixels + static_cast<int>(static_cast<float>(image_height) / 2.f), input_height);
+//        sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
         sub_image_width = static_cast<int>(static_cast<float>(sub_image_height) / input_aspect_ratio);
         std::cout << "Breaking up image into two quads of subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
         // TODO dwh: make roi and then use them to make sub images
