@@ -260,7 +260,7 @@ Status LoadGraph(const string &graph_file_name,
     return tensorflow::errors::FailedPrecondition("Failed to parse compute graph at '", graph_file_name, "'");
   }
 
-  // TODO dwh: not the following code should work but there is a bug that breaks it in tensorflow
+  // TODO dwh: note the following code should work but there is a bug that breaks it in tensorflow
   // so we need to use a setenv("CUDA_VISIBLE_DEVICES", "", 1) command instead which is done in main
 //  tensorflow::SessionOptions options;
 ////
