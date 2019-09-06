@@ -710,6 +710,8 @@ int main(int argc, char *argv[]) {
 
   // First we load and initialize the model.
   std::unique_ptr<tensorflow::Session> session;
+  // so if not-use_gpu, we overwrite the env to show no available devices
+  // otherwise, whatever devices are there are available to use
   if (!use_gpu) {
     setenv("CUDA_VISIBLE_DEVICES", "", 1);
   }
