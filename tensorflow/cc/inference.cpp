@@ -260,7 +260,7 @@ Status LoadGraph(const string &graph_file_name,
     return tensorflow::errors::FailedPrecondition("Failed to parse compute graph at '", graph_file_name, "'");
   }
 
-  // TODO dwh: not the following code should work but there is a bug that breaks it in tensorflow
+  // TODO dwh: note that the following code should work but there is a bug that breaks it in tensorflow
   // so we need to use a setenv("CUDA_VISIBLE_DEVICES", "", 1) command instead which is done in main
 //  tensorflow::SessionOptions options;
 ////
@@ -541,9 +541,36 @@ void add_images(const float *first_image,
       for (auto s = 0; s < num_classes; s++) {
         float segmentation_value = 0;
         // use both sub images in equal proportion
-        segmentation_value = 0.5f * first_image[(i * num_y + j) * num_classes + s];
-        segmentation_value += 0.5f * second_image[(i * num_y + j) * num_classes + s];
-        merged_output[(i * num_y + j) * num_classes + s] = segmentation_value;
+        segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
+        segmentation_value += 0.5f * second_image[((i * num_y + j) * num_classes) + s];
+        merged_output[((i * num_y + j) * num_classes) + s] = segmentation_value;
+      }
+    }
+  }
+}
+
+// This takes two pointers to images and adds them together.  The two images must be the same size--num_y by num_x
+// and the output will be the same size as the input images.
+// The merged_output should be a pre-allocated array of the correct size in the calling function.
+void add_images(const float *first_image,
+                float *second_image,
+                const int num_y,
+                const int num_x,
+                const int num_classes) {
+  assert(first_image != nullptr);
+  assert(second_image != nullptr);
+  std::cout << "Performing the add" << std::endl;
+  for (auto i = 0; i < num_x; i++) {
+    for (auto j = 0; j < num_y; j++) {
+      for (auto s = 0; s < num_classes; s++) {
+//        float segmentation_value = 0;
+//        // use both sub images in equal proportion
+//        segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
+//        segmentation_value += 0.5f * second_image[((i * num_y + j) * num_classes) + s];
+//        second_image[((i * num_y + j) * num_classes) + s] = segmentation_value;
+std::cout << "For pixel x=" << i << " y=" << j << " class=" << s << " value=" << first_image[((i * num_y + j) * num_classes) + s] << std::endl;
+        second_image[((i * num_y + j) * num_classes) + s] /= 2;
+        second_image[((i * num_y + j) * num_classes) + s] += 0.5f * first_image[((i * num_y + j) * num_classes) + s];
       }
     }
   }
@@ -623,7 +650,19 @@ int write_tiff_file(const float *merged_output_classes,
   return 0;
 }
 
+void quad_decomposition(const cv::Mat &inputImage, int sub_image_width, int sub_image_height, std::vector<cv::Mat> &sub_images, std::vector<cv::Rect> &rectangles) {
+  // TODO: ensure that sub_image width and height are less than image width and heights
 
+  // Make roi and then use it to make sub images
+  rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
+  sub_images.push_back(inputImage(rectangles.back()));
+  rectangles.push_back(cv::Rect(inputImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
+  sub_images.push_back(inputImage(rectangles.back()));
+  rectangles.push_back(cv::Rect(0, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
+  sub_images.push_back(inputImage(rectangles.back()));
+  rectangles.push_back(cv::Rect(inputImage.cols - sub_image_width, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
+  sub_images.push_back(inputImage(rectangles.back()));
+}
 
 
 
@@ -771,12 +810,17 @@ int main(int argc, char *argv[]) {
     // break into pieces if input image is not square
     std::vector<cv::Mat> sub_images {};
     std::vector<cv::Rect> rectangles {};
+    std::vector<cv::Mat> hex_images {};
+    std::vector<cv::Rect> hex_rectangles {};
+    auto hex_quads = std::vector<float*> {};
     if (image_height > static_cast<int>(float(image_width) * input_aspect_ratio)) {
       LOG(ERROR) << "Error: Image height is proportionally greater than image width";
       return -1;
     }
     int sub_image_height = image_height;
     int sub_image_width = static_cast<int>(static_cast<float>(image_height) / input_aspect_ratio);
+    int hex_image_height = 0;
+    int hex_image_width = 0;
     cv::Mat leftImage(sub_image_width, sub_image_height, CV_8UC3);
     cv::Mat rightImage(sub_image_width, sub_image_height, CV_8UC3);
     if (image_height != static_cast<int>(static_cast<float>(image_width) * input_aspect_ratio)) {
@@ -801,23 +845,20 @@ int main(int argc, char *argv[]) {
 //        sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
         sub_image_width = static_cast<int>(static_cast<float>(sub_image_height) / input_aspect_ratio);
         std::cout << "Breaking up image into two quads of subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
-        // TODO dwh: make roi and then use them to make sub images
-        sub_images.push_back(leftImage(cv::Rect(0, 0, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
-        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_width, 0, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
-        sub_images.push_back(leftImage(cv::Rect(0, leftImage.rows - sub_image_height, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(0, leftImage.rows - sub_image_height, sub_image_width, sub_image_height));
-        sub_images.push_back(leftImage(cv::Rect(leftImage.cols - sub_image_width, leftImage.rows - sub_image_height, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(leftImage.cols - sub_image_width, leftImage.rows - sub_image_height, sub_image_width, sub_image_height));
-        sub_images.push_back(rightImage(cv::Rect(0, 0, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
-        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, 0, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
-        sub_images.push_back(rightImage(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(0, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
-        sub_images.push_back(rightImage(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height)));
-        rectangles.push_back(cv::Rect(rightImage.cols - sub_image_width, rightImage.rows - sub_image_height, sub_image_width, sub_image_height));
+        hive_segmentation::quad_decomposition(leftImage, sub_image_width, sub_image_height, sub_images, rectangles);
+        hive_segmentation::quad_decomposition(rightImage, sub_image_width, sub_image_height, sub_images, rectangles);
+
+        // TODO: determine if we want to do another layer of decomposition
+        if (static_cast<float>(sub_image_height) > 1.5 * static_cast<float>(input_height)) {
+          // Make another subimage vector for hex images and populate it
+          hex_image_height = overlap_pixels + static_cast<int>(static_cast<float>(sub_images[0].rows) / 2.f);
+          // TODO: is the aspect ratio valid here?
+          hex_image_width = static_cast<int>(static_cast<float>(hex_image_height) / input_aspect_ratio);
+          std::cout << "Making hex subimages with height " << hex_image_height << " and width " << hex_image_width << std::endl;
+          for (auto sub_image : sub_images) {
+            hive_segmentation::quad_decomposition(sub_image, hex_image_width, hex_image_height, hex_images, hex_rectangles);
+          }
+        }
 
         std::cout << "Adding resized left and right subimages" << std::endl;
         cv::Mat resizedLeft(sub_image_width, sub_image_height, CV_8UC3);
@@ -866,7 +907,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-
     // resize and normalize input by mean and std
     std::cout << "Resizing and Normalizing input tensor" << std::endl;
     std::vector<Tensor> resized_normal_tensors {};
@@ -874,6 +914,106 @@ int main(int argc, char *argv[]) {
     if (!resized_normalize_status.ok()) {
       LOG(ERROR) << "Error: Input tensor normalization failed: " << resized_normalize_status;
       return -1;
+    }
+
+    tensorflow::Tensor hex_input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({static_cast<int>(hex_images.size()), hex_image_width, hex_image_height, input_channels}));
+    auto hex_input_tensor_mapped = hex_input_tensor.tensor<float, 4>();
+    if (!hex_images.empty()) {
+      for (std::size_t sub_index = 0; sub_index < hex_images.size(); sub_index++) {
+        std::cout << "Making tensor for hex image " << sub_index << " of " << hex_images.size() << std::endl;
+        //    std::cout << "Rows " << hex_images[sub_index].rows << " and cols " << hex_images[sub_index].cols << std::endl;
+        for (int y = 0; y < hex_images[sub_index].rows; y++) {
+          for (int x = 0; x < hex_images[sub_index].cols; x++) {
+            cv::Vec3b pixel = hex_images[sub_index].at<cv::Vec3b>(y, x);
+            // tensorflow reads files as BGR, so need to order/reorder data that way
+            //        std::cout << "Pixel " << x << " " << y << " is " << pixel << std::endl;
+            hex_input_tensor_mapped(sub_index, y, x, 0) = pixel.val[2]; //B
+            hex_input_tensor_mapped(sub_index, y, x, 1) = pixel.val[1]; //G
+            hex_input_tensor_mapped(sub_index, y, x, 2) = pixel.val[0]; //R
+          }
+        }
+      }
+
+      // resize and normalize hex input by mean and std
+      std::cout << "Resizing and Normalizing hex input tensor" << std::endl;
+      std::vector<Tensor> resized_normal_hex_tensors {};
+      Status resized_normalize_hex_status = ::hive_segmentation::NormalizeTensor(hex_input_tensor, &resized_normal_hex_tensors, input_height, input_width); //, input_mean, input_std);
+      if (!resized_normalize_hex_status.ok()) {
+        LOG(ERROR) << "Error: Input hex tensor normalization failed: " << resized_normalize_hex_status;
+        return -1;
+      }
+
+      // Actually run the hex images through the model.
+      std::cout << "Running hex images in the model" << std::endl;
+      std::vector<Tensor> hex_outputs {};
+      Status run_hex_status = session->Run({{input_layer, resized_normal_hex_tensors[0]}},
+                                       {output_layer}, {}, &hex_outputs);
+      if (!run_hex_status.ok()) {
+        LOG(ERROR) << "Error: Running hex model failed: " << run_hex_status;
+        return -1;
+      }
+      std::cout << "Finished running hex model with " << hex_outputs.size() << " results" << std::endl;
+      if (hex_outputs.size() != 1) {
+        LOG(ERROR) << "Error: invalid number of hex outputs: " << hex_outputs.size();
+        return -1;
+      }
+      auto const &hex_output = hex_outputs[0];
+      auto hex_output_classes = uint(hex_output.shape().dim_size(3));
+      std::cout << "Output hex shape is " << hex_output.shape() << " with " << hex_output.shape().dims() << " dimensions and " << hex_output_classes << " classes" << std::endl;
+
+      std::vector<Tensor> resized_hex_outputs {};
+      Status resize_hex_status = ::hive_segmentation::ResizeTensor(hex_output, &resized_hex_outputs, hex_image_height, hex_image_width);
+      if (!resize_hex_status.ok()) {
+        LOG(ERROR) << "Error: Resizing hex output from model failed: " << resize_hex_status;
+        return -1;
+      }
+      std::cout << "Model hex results resized to " << (resized_hex_outputs[0]).shape() << " for sub merging" << std::endl;
+
+    // TODO merge the above hex images into 8 arrays of sub images that can be added later
+//      auto **hex_quads = new float[8][sub_image_height * sub_image_width * output_classes];
+      hex_quads.resize(8);
+      auto float_output_hex_array = static_cast<float *>(resized_hex_outputs[0].flat<float>().data());
+
+      // need some temporary data structures
+      auto *merged_top_quad = new float[hex_image_height * sub_image_width * output_classes];
+      auto *merged_bottom_quad = new float[hex_image_height * sub_image_width * output_classes];
+
+      for (int hquad = 0; hquad < 8; ++hquad) {
+        int offset = hquad * 4;
+        auto *hex_quad = new float[sub_image_height * sub_image_width * output_classes];
+        hive_segmentation::hz_merge(float_output_hex_array,
+                                    offset + 0,
+                                    offset + 1,
+                                    hex_image_height,
+                                    hex_image_width,
+                                    output_classes,
+                                    merged_top_quad,
+                                    hex_image_height,
+                                    sub_image_width);
+
+        hive_segmentation::hz_merge(float_output_hex_array,
+                                    offset + 2,
+                                    offset + 3,
+                                    hex_image_height,
+                                    hex_image_width,
+                                    output_classes,
+                                    merged_bottom_quad,
+                                    hex_image_height,
+                                    sub_image_width);
+
+        hive_segmentation::vert_merge(merged_top_quad,
+                                      merged_bottom_quad,
+                                      hex_image_height,
+                                      sub_image_width,
+                                      output_classes,
+                                      hex_quad,
+                                      sub_image_height,
+                                      sub_image_width);
+        hex_quads.emplace_back(hex_quad);
+      }
+
+      delete[] merged_top_quad;
+      delete[] merged_bottom_quad;
     }
 
 
@@ -899,6 +1039,13 @@ int main(int argc, char *argv[]) {
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     auto *merged_output_classes = new float[image_height * image_width * output_classes];
+    // TODO test--just add sum image output into above using rect
+
+//    // TODO test--resize to hex size--no rect dimensions are based on sub image size
+//    // TODO test--just add hex output into above using rect
+//    std::cout << "ROI 0 x: " << rectangles[0].x << " y: " << rectangles[0].y << " height " << rectangles[0].height << " and width " << rectangles[0].width  << std::endl;
+//    std::cout << "ROI 3 x: " << rectangles[3].x << " y: " << rectangles[3].y << " height " << rectangles[3].height << " and width " << rectangles[3].width  << std::endl;
+
     float *dual_output_classes = nullptr;
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
@@ -927,6 +1074,8 @@ int main(int argc, char *argv[]) {
         // no break here because want to also run the case 8 when we have 10
       }
       case 8: {
+        // TODO: check for hex_images.empty() and process them here
+
         resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_height, sub_image_width);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
@@ -941,10 +1090,29 @@ int main(int argc, char *argv[]) {
         auto *merged_left = new float[leftImage.cols * leftImage.rows * output_classes];
         auto *merged_right = new float[rightImage.cols * rightImage.rows * output_classes];
 
+        for (std::size_t ihex = 0; ihex < hex_quads.size(); ++ihex) {
+          std::cout << "Adding hex to quad " << ihex << std::endl;
+          hive_segmentation::add_images(
+              hex_quads[ihex],
+              &(float_output_array8[ihex * sub_image_height * sub_image_width * output_classes]),
+              sub_image_height,
+              sub_image_width,
+              output_classes);
+        }
+
         // now have 8 dimensional array of size sub_image_height x sub_image_width x num_classes
         // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
         // (  top    vt  bottom ) hz (  top    vt  bottom )
         //         left           hz           right
+//        hive_segmentation::hz_merge(&(float_output_array8[0]),
+//                                    &(float_output_array8[1 * sub_image_height * sub_image_width * output_classes]),
+//                                    sub_image_height,
+//                                    sub_image_width,
+//                                    output_classes,
+//                                    merged_top_quad,
+//                                    sub_image_height,
+//                                    leftImage.cols);
+
         hive_segmentation::hz_merge(float_output_array8,
                                     0,
                                     1,
