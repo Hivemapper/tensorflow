@@ -317,7 +317,7 @@ int load_images_from_file(const string &image_filename,
   if (image_result_filename.empty() || (bulk_images->size() != bulk_results->size())) {
     bulk_results->clear();
     for (auto const &image_file : *bulk_images) {
-      bulk_results->push_back(image_file.substr(0, image_file.find_last_of('.'))+".tif");
+      bulk_results->emplace_back(image_file.substr(0, image_file.find_last_of('.'))+".tif");
     }
     std::cout << "Generated " << bulk_results->size() << " result image file names" << std::endl;
   } else {
@@ -617,7 +617,7 @@ int write_tiff_file(const std::vector<float> &merged_output_classes,
       }
       for (int s=0; s<output_classes; s++) {
         segmentation_value = merged_output_classes[(j * final_image_height + i) * output_classes + s];
-        segmentation_floats.push_back(segmentation_value);
+        segmentation_floats.emplace_back(segmentation_value);
         //        segmentation_floats->insert(s, segmentation_value);
 //          std::cout << "pixel " << i << " " << j << " " << s << " is " << segmentation_value << std::endl;
       }
@@ -655,14 +655,14 @@ void quad_decomposition(const cv::Mat &inputImage, int sub_image_width, int sub_
   // TODO: ensure that sub_image width and height are less than image width and heights
 
   // Make roi and then use it to make sub images
-  rectangles.push_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
-  sub_images.push_back(inputImage(rectangles.back()));
-  rectangles.push_back(cv::Rect(inputImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
-  sub_images.push_back(inputImage(rectangles.back()));
-  rectangles.push_back(cv::Rect(0, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
-  sub_images.push_back(inputImage(rectangles.back()));
-  rectangles.push_back(cv::Rect(inputImage.cols - sub_image_width, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
-  sub_images.push_back(inputImage(rectangles.back()));
+  rectangles.emplace_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
+  sub_images.emplace_back(inputImage(rectangles.back()));
+  rectangles.emplace_back(cv::Rect(inputImage.cols - sub_image_width, 0, sub_image_width, sub_image_height));
+  sub_images.emplace_back(inputImage(rectangles.back()));
+  rectangles.emplace_back(cv::Rect(0, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
+  sub_images.emplace_back(inputImage(rectangles.back()));
+  rectangles.emplace_back(cv::Rect(inputImage.cols - sub_image_width, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
+  sub_images.emplace_back(inputImage(rectangles.back()));
 }
 
 
@@ -697,6 +697,7 @@ int main(int argc, char *argv[]) {
 
   // some config
   bool do_quads = true;
+  bool do_hexes = true;
 //  float overlap_fraction = 1.1;
   int overlap_pixels = 32;
   bool use_gpu = false;
@@ -729,6 +730,7 @@ int main(int argc, char *argv[]) {
     Flag("graph", &graph, "graph to be executed--default is segmentation_model.pb"),
     Flag("root_dir", &root_dir, "interpret graph file names relative to this directory--default is ./"),
     Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up--default is true"),
+    Flag("do_hexes", &do_hexes, "do hex breakdown in addition to quads and squaring up--default is true"),
     // TODO dwh: we could set this to an integer to indicate which gpu to use if there are more than one and -1 to disable??
     Flag("use_gpu", &use_gpu, "use gpu--default is false"),
   };
@@ -778,8 +780,8 @@ int main(int argc, char *argv[]) {
       return -1;
     }
   } else {
-    bulk_images.push_back(image_filename);
-    bulk_results.push_back(image_result_filename);
+    bulk_images.emplace_back(image_filename);
+    bulk_results.emplace_back(image_result_filename);
   }
 
 
@@ -849,8 +851,8 @@ int main(int argc, char *argv[]) {
         hive_segmentation::quad_decomposition(leftImage, sub_image_width, sub_image_height, sub_images, rectangles);
         hive_segmentation::quad_decomposition(rightImage, sub_image_width, sub_image_height, sub_images, rectangles);
 
-        // TODO: determine if we want to do another layer of decomposition
-        if (static_cast<float>(sub_image_height) > 1.5 * static_cast<float>(input_height)) {
+        // Determine if we want to do another layer of decomposition
+        if (do_hexes && static_cast<float>(sub_image_height) > 1.5 * static_cast<float>(input_height)) {
           // Make another subimage vector for hex images and populate it
           hex_image_height = overlap_pixels + static_cast<int>(static_cast<float>(sub_images[0].rows) / 2.f);
           // TODO: is the aspect ratio valid here?
@@ -864,25 +866,26 @@ int main(int argc, char *argv[]) {
         std::cout << "Adding resized left and right subimages" << std::endl;
         cv::Mat resizedLeft(sub_image_width, sub_image_height, CV_8UC3);
         cv::resize(leftImage, resizedLeft, cv::Size(sub_image_width, sub_image_height));
-        sub_images.push_back(resizedLeft);
-        rectangles.push_back(leftROI);
+        sub_images.emplace_back(resizedLeft);
+        rectangles.emplace_back(leftROI);
         cv::Mat resizedRight(sub_image_width, sub_image_height, CV_8UC3);
         cv::resize(rightImage, resizedRight, cv::Size(sub_image_width, sub_image_height));
-        sub_images.push_back(resizedRight);
-        rectangles.push_back(rightROI);
+        sub_images.emplace_back(resizedRight);
+        rectangles.emplace_back(rightROI);
+
       } else {
         sub_image_width = sub_image_height;
         std::cout << "Breaking up image into two subimages with height " << sub_image_height << " and width " << sub_image_width << std::endl;
-        sub_images.push_back(leftImage);
-        rectangles.push_back(leftROI);
-        sub_images.push_back(rightImage);
-        rectangles.push_back(rightROI);
+        sub_images.emplace_back(leftImage);
+        rectangles.emplace_back(leftROI);
+        sub_images.emplace_back(rightImage);
+        rectangles.emplace_back(rightROI);
       }
     } else {
       //only have one image to process and no recombining
       std::cout << "Have single image with height " << sub_image_height << " and width " << sub_image_width << std::endl;
-      sub_images.push_back(orig_image_mat);
-      rectangles.push_back(cv::Rect(0, 0, image_width, image_height));
+      sub_images.emplace_back(orig_image_mat);
+      rectangles.emplace_back(cv::Rect(0, 0, image_width, image_height));
     }
 
 
@@ -917,9 +920,11 @@ int main(int argc, char *argv[]) {
       return -1;
     }
 
-    tensorflow::Tensor hex_input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({static_cast<int>(hex_images.size()), hex_image_width, hex_image_height, input_channels}));
-    auto hex_input_tensor_mapped = hex_input_tensor.tensor<float, 4>();
+
     if (!hex_images.empty()) {
+      tensorflow::Tensor hex_input_tensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({static_cast<int>(hex_images.size()), hex_image_width, hex_image_height, input_channels}));
+      auto hex_input_tensor_mapped = hex_input_tensor.tensor<float, 4>();
+
       for (std::size_t sub_index = 0; sub_index < hex_images.size(); sub_index++) {
         std::cout << "Making tensor for hex image " << sub_index + 1 << " of " << hex_images.size() << std::endl;
         //    std::cout << "Rows " << hex_images[sub_index].rows << " and cols " << hex_images[sub_index].cols << std::endl;
@@ -978,13 +983,8 @@ int main(int argc, char *argv[]) {
         int sub_offset = hquad * 4;
 //        std::cout << "Running hex " << hquad << " with offset " << sub_offset << " and size " << hex_image_height * sub_image_width * output_classes << std::endl;
         std::vector<float> merged_top_quad {};
-//        std::cout << "Max size " << merged_top_quad.max_size() << std::endl;
-//        merged_top_quad->resize(hex_image_height * sub_image_width * output_classes, 0.f);
-//        merged_top_quad->reserve(hex_image_height * sub_image_width * output_classes);
         std::vector<float> merged_bottom_quad {};
-//        merged_bottom_quad->resize(hex_image_height * sub_image_width * output_classes, 0.f);
         std::vector<float> hex_quad {};
-//        hex_quad->resize(sub_image_height * sub_image_width * output_classes, 0.f);
         hive_segmentation::hz_merge(float_output_hex_array,
                                     sub_offset + 0,
                                     sub_offset + 1,
@@ -1055,7 +1055,6 @@ int main(int argc, char *argv[]) {
     switch (sub_images.size()) {
       case 10: {
         // make dual output merged classes for later combining with quads
-//        dual_output_classes->resize(image_height * image_width * output_classes);
         // don't really need to resize the entire output, but for simplicity we do
         resize_status = ::hive_segmentation::ResizeTensor(output, &full_outputs, leftImage.rows, leftImage.cols);
         if (!resize_status.ok()) {
@@ -1076,8 +1075,6 @@ int main(int argc, char *argv[]) {
         // no break here because want to also run the case 8 when we have 10
       }
       case 8: {
-        // TODO: check for hex_images.empty() and process them here
-
         resize_status = ::hive_segmentation::ResizeTensor(output, &resized_outputs, sub_image_height, sub_image_width);
         if (!resize_status.ok()) {
           LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_status;
@@ -1096,7 +1093,7 @@ int main(int argc, char *argv[]) {
 //          std::cout << "Adding hex to quad " << ihex << " of size " << hex_quads[ihex].size() << std::endl;
           hive_segmentation::add_images(
               hex_quads[ihex],
-              &(float_output_array8[ihex * sub_image_height * sub_image_width * output_classes]),
+              &(float_output_array8[static_cast<int>(ihex) * sub_image_height * sub_image_width * output_classes]),
               sub_image_height,
               sub_image_width,
               output_classes);
