@@ -652,8 +652,8 @@ int write_tiff_file(const std::vector<float> &merged_output_classes,
 }
 
 void quad_decomposition(const cv::Mat &inputImage, int sub_image_width, int sub_image_height, std::vector<cv::Mat> &sub_images, std::vector<cv::Rect> &rectangles) {
-  // TODO: ensure that sub_image width and height are less than image width and heights
-
+  assert(sub_image_height < inputImage.rows);
+  assert(sub_image_width < inputImage.cols);
   // Make roi and then use it to make sub images
   rectangles.emplace_back(cv::Rect(0, 0, sub_image_width, sub_image_height));
   sub_images.emplace_back(inputImage(rectangles.back()));
@@ -664,8 +664,6 @@ void quad_decomposition(const cv::Mat &inputImage, int sub_image_width, int sub_
   rectangles.emplace_back(cv::Rect(inputImage.cols - sub_image_width, inputImage.rows - sub_image_height, sub_image_width, sub_image_height));
   sub_images.emplace_back(inputImage(rectangles.back()));
 }
-
-
 
 } // end hive_segmentation namespace
 
@@ -887,6 +885,8 @@ int main(int argc, char *argv[]) {
       sub_images.emplace_back(orig_image_mat);
       rectangles.emplace_back(cv::Rect(0, 0, image_width, image_height));
     }
+//    std::cout << "ROI 0 x: " << rectangles[0].x << " y: " << rectangles[0].y << " height " << rectangles[0].height << " and width " << rectangles[0].width  << std::endl;
+//    std::cout << "ROI 3 x: " << rectangles[3].x << " y: " << rectangles[3].y << " height " << rectangles[3].height << " and width " << rectangles[3].width  << std::endl;
 
 
     // create tensorflow tensor directly from in-memory opencv mat
@@ -976,7 +976,7 @@ int main(int argc, char *argv[]) {
       std::cout << "Model hex results resized to " << (resized_hex_outputs[0]).shape() << " for sub merging" << std::endl;
       output_classes = uint(hex_output.shape().dim_size(3));
 
-    // TODO merge the above hex images into 8 arrays of sub images that can be added later
+      // Merge the above 32 hex images into 8 arrays of sub images that can be added later
       auto float_output_hex_array = static_cast<float *>(resized_hex_outputs[0].flat<float>().data());
 
       for (int hquad = 0; hquad < 8; ++hquad) {
@@ -1013,6 +1013,7 @@ int main(int argc, char *argv[]) {
                                       hex_quad,
                                       sub_image_height,
                                       sub_image_width);
+
         hex_quads.emplace_back(hex_quad);
       }
     }
@@ -1040,14 +1041,6 @@ int main(int argc, char *argv[]) {
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     std::vector<float> merged_output_classes {};
-    // TODO test--just add sum image output into above using rect
-
-//    // TODO test--resize to hex size--no rect dimensions are based on sub image size
-//    // TODO test--just add hex output into above using rect
-//    std::cout << "ROI 0 x: " << rectangles[0].x << " y: " << rectangles[0].y << " height " << rectangles[0].height << " and width " << rectangles[0].width  << std::endl;
-//    std::cout << "ROI 3 x: " << rectangles[3].x << " y: " << rectangles[3].y << " height " << rectangles[3].height << " and width " << rectangles[3].width  << std::endl;
-
-//    float *dual_output_classes = nullptr;
     std::vector<float> dual_output_classes {};
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
@@ -1132,6 +1125,9 @@ int main(int argc, char *argv[]) {
                                       merged_left,
                                       leftImage.rows,
                                       leftImage.cols);
+
+        merged_top_quad.clear();
+        merged_bottom_quad.clear();
 
         hive_segmentation::hz_merge(float_output_array8,
                                     4,
