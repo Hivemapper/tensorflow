@@ -537,11 +537,10 @@ void add_images(const std::vector<float> &first_image,
   for (auto i = 0; i < num_x; i++) {
     for (auto j = 0; j < num_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
-        float segmentation_value = 0;
+        float segmentation_value = 0.f;
         // use both sub images in equal proportion
         segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
         segmentation_value += 0.5f * second_image[((i * num_y + j) * num_classes) + s];
-//        merged_output[((i * num_y + j) * num_classes) + s] = segmentation_value;
         merged_output.emplace_back(segmentation_value);
       }
     }
@@ -562,15 +561,7 @@ void add_images(const std::vector<float> &first_image,
   for (auto i = 0; i < num_x; i++) {
     for (auto j = 0; j < num_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
-//        float segmentation_value = 0;
-//        // use both sub images in equal proportion
-//        segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
-//        segmentation_value += 0.5f * second_image[((i * num_y + j) * num_classes) + s];
-//        second_image[((i * num_y + j) * num_classes) + s] = segmentation_value;
-//std::cout << "For pixel x=" << i << " y=" << j << " class=" << s << " value=" << std::endl;
-//std::cout << first_image[((i * num_y + j) * num_classes) + s] << std::endl;
-//std::cout << second_image[((i * num_y + j) * num_classes) + s] << std::endl;
-        second_image[((i * num_y + j) * num_classes) + s] /= 2;
+        second_image[((i * num_y + j) * num_classes) + s] *= 0.5f;
         second_image[((i * num_y + j) * num_classes) + s] += 0.5f * first_image[((i * num_y + j) * num_classes) + s];
       }
     }
@@ -841,7 +832,7 @@ int main(int argc, char *argv[]) {
       //    std::cout << "Right " << rightROI << std::endl;
       rightImage = orig_image_mat(rightROI);
 
-      if (do_quads) {
+      if (do_quads && static_cast<float>(sub_image_height) > 1.4 * static_cast<float>(input_height)) {
         sub_image_height = std::max(overlap_pixels + static_cast<int>(static_cast<float>(image_height) / 2.f), input_height);
 //        sub_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
         sub_image_width = static_cast<int>(static_cast<float>(sub_image_height) / input_aspect_ratio);
