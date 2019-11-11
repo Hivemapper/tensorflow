@@ -249,7 +249,8 @@ Status ParseGraph(const GraphDef *graph_def, string &input_layer, string &output
 Status LoadGraph(const string &graph_file_name,
                  std::unique_ptr<Session> *session,
                  string &input_layer, string &output_layer,
-                 int32& input_batch_size, int32& input_width, int32& input_height, int32& input_channels) {
+                 int32& input_batch_size, int32& input_width,
+                 int32& input_height, int32& input_channels) {
   GraphDef graph_def;
   Status load_graph_status = tensorflow::graph_transforms::LoadTextOrBinaryGraphFile(graph_file_name, &graph_def);
   if (!load_graph_status.ok()) {
@@ -359,18 +360,19 @@ std::vector<float> blender_array(int num_vals, int sub_size) {
 // the combined image should be.
 // The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
-void hz_merge(const float *results,
-              const int first_image,
-              const int second_image,
-              const int num_y,
-              const int num_x,
-              const int num_classes,
-              std::vector<float> &merged_output,
-              const int target_y,
-              const int target_x) {
+std::vector<float> hz_merge(const float *results,
+                            const int first_image,
+                            const int second_image,
+                            const int num_y,
+                            const int num_x,
+                            const int num_classes,
+                            const int target_y,
+                            const int target_x) {
   assert(num_y == target_y);
   assert(num_x < target_x);
   assert(results != nullptr);
+  std::vector<float> merged_output {};
+  merged_output.reserve(target_y * target_x * num_classes);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -395,6 +397,7 @@ void hz_merge(const float *results,
       }
     }
   }
+  return merged_output;
 }
 
 // Takes two image pointers corresponding to two images to merge horizontally.
@@ -402,18 +405,19 @@ void hz_merge(const float *results,
 // the combined image should be.
 // The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note this function does not reverse the indices when creating the merged image
-void hz_merge(const std::vector<float> &first_image,
-              const std::vector<float> &second_image,
-              const int num_y,
-              const int num_x,
-              const int num_classes,
-              std::vector<float> &merged_output,
-              const int target_y,
-              const int target_x) {
+std::vector<float> hz_merge(const std::vector<float> &first_image,
+                            const std::vector<float> &second_image,
+                            const int num_y,
+                            const int num_x,
+                            const int num_classes,
+                            const int target_y,
+                            const int target_x) {
   assert(num_y == target_y);
   assert(num_x < target_x);
   assert(!(first_image == nullptr || first_image.empty()));
   assert(!(second_image == nullptr || second_image.empty()));
+  std::vector<float> merged_output {};
+  merged_output.reserve(target_y * target_x * num_classes);
   int offset = target_x - num_x;
   auto x_blending_factor = blender_array(target_x, num_x);
 
@@ -438,6 +442,7 @@ void hz_merge(const std::vector<float> &first_image,
       }
     }
   }
+  return merged_output;
 }
 
 // Takes a tensorflow result pointer and two indices into that pointer corresponding to the two images to merge vertically.
@@ -445,18 +450,19 @@ void hz_merge(const std::vector<float> &first_image,
 // the combined image should be.
 // The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note that because tensorflow data is inverted from normal, this function reverses the indices when creating the merged image
-void vert_merge(const float *results,
-                const int first_image,
-                const int second_image,
-                const int num_y,
-                const int num_x,
-                const int num_classes,
-                std::vector<float> &merged_output,
-                const int target_y,
-                const int target_x) {
+std::vector<float> vert_merge(const float *results,
+                              const int first_image,
+                              const int second_image,
+                              const int num_y,
+                              const int num_x,
+                              const int num_classes,
+                              const int target_y,
+                              const int target_x) {
   assert(num_x == target_x);
   assert(num_y < target_y);
   assert(results != nullptr);
+  std::vector<float> merged_output {};
+  merged_output.reserve(target_y * target_x * num_classes);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -481,6 +487,7 @@ void vert_merge(const float *results,
       }
     }
   }
+  return merged_output;
 }
 
 // Takes two image pointers corresponding to two images to merge vertically.
@@ -488,18 +495,19 @@ void vert_merge(const float *results,
 // the combined image should be.
 // The merged_output should be a pre-allocated array of the correct size in the calling function.
 // Note this function does not reverse the indices when creating the merged image
-void vert_merge(const std::vector<float> &first_image,
-                const std::vector<float> &second_image,
-                const int num_y,
-                const int num_x,
-                const int num_classes,
-                std::vector<float> &merged_output,
-                const int target_y,
-                const int target_x) {
+std::vector<float> vert_merge(const std::vector<float> &first_image,
+                              const std::vector<float> &second_image,
+                              const int num_y,
+                              const int num_x,
+                              const int num_classes,
+                              const int target_y,
+                              const int target_x) {
   assert(num_x == target_x);
   assert(num_y < target_y);
   assert(!(first_image == nullptr || first_image.empty()));
   assert(!(second_image == nullptr || second_image.empty()));
+  std::vector<float> merged_output {};
+  merged_output.reserve(target_y * target_x * num_classes);
   int offset = target_y - num_y;
   auto y_blending_factor = blender_array(target_y, num_y);
 
@@ -522,6 +530,7 @@ void vert_merge(const std::vector<float> &first_image,
       }
     }
   }
+  return merged_output;
 }
 
 // This takes two pointers to images and adds them together.  The two images must be the same size--num_y by num_x
@@ -644,7 +653,11 @@ int write_tiff_file(const std::vector<float> &merged_output_classes,
   return 0;
 }
 
-void quad_decomposition(const cv::Mat &inputImage, int sub_image_width, int sub_image_height, std::vector<cv::Mat> &sub_images, std::vector<cv::Rect> &rectangles) {
+void quad_decomposition(const cv::Mat &inputImage,
+                        int sub_image_width,
+                        int sub_image_height,
+                        std::vector<cv::Mat> &sub_images,
+                        std::vector<cv::Rect> &rectangles) {
   assert(sub_image_height < inputImage.rows);
   assert(sub_image_width < inputImage.cols);
   // Make roi and then use it to make sub images
@@ -975,40 +988,34 @@ int main(int argc, char *argv[]) {
       for (int hquad = 0; hquad < 8; ++hquad) {
         int sub_offset = hquad * 4;
 //        std::cout << "Running hex " << hquad << " with offset " << sub_offset << " and size " << hex_image_height * sub_image_width * output_classes << std::endl;
-        std::vector<float> merged_top_quad {};
-        merged_top_quad.reserve(hex_image_height * sub_image_width * output_classes);
-        std::vector<float> merged_bottom_quad {};
-        merged_bottom_quad.reserve(hex_image_height * sub_image_width * output_classes);
-        std::vector<float> hex_quad {};
-        hex_quad.reserve(sub_image_height * sub_image_width * output_classes);
-        hive_segmentation::hz_merge(float_output_hex_array,
-                                    sub_offset + 0,
-                                    sub_offset + 1,
-                                    hex_image_height,
-                                    hex_image_width,
-                                    output_classes,
-                                    merged_top_quad,
-                                    hex_image_height,
-                                    sub_image_width);
+        auto merged_top_quad = hive_segmentation::hz_merge(
+            float_output_hex_array,
+            sub_offset + 0,
+            sub_offset + 1,
+            hex_image_height,
+            hex_image_width,
+            output_classes,
+            hex_image_height,
+            sub_image_width);
 
-        hive_segmentation::hz_merge(float_output_hex_array,
-                                    sub_offset + 2,
-                                    sub_offset + 3,
-                                    hex_image_height,
-                                    hex_image_width,
-                                    output_classes,
-                                    merged_bottom_quad,
-                                    hex_image_height,
-                                    sub_image_width);
+        auto merged_bottom_quad = hive_segmentation::hz_merge(
+            float_output_hex_array,
+            sub_offset + 2,
+            sub_offset + 3,
+            hex_image_height,
+            hex_image_width,
+            output_classes,
+            hex_image_height,
+            sub_image_width);
 
-        hive_segmentation::vert_merge(merged_top_quad,
-                                      merged_bottom_quad,
-                                      hex_image_height,
-                                      sub_image_width,
-                                      output_classes,
-                                      hex_quad,
-                                      sub_image_height,
-                                      sub_image_width);
+        auto hex_quad = hive_segmentation::vert_merge(
+            merged_top_quad,
+            merged_bottom_quad,
+            hex_image_height,
+            sub_image_width,
+            output_classes,
+            sub_image_height,
+            sub_image_width);
 
         hex_quads.emplace_back(hex_quad);
       }
@@ -1037,9 +1044,7 @@ int main(int argc, char *argv[]) {
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     std::vector<float> merged_output_classes {};
-    merged_output_classes.reserve(image_height * image_width * output_classes);
     std::vector<float> dual_output_classes {};
-    dual_output_classes.reserve(image_height * image_width * output_classes);
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
     resized_outputs.reserve(image_height * image_width * output_classes);
@@ -1056,15 +1061,15 @@ int main(int argc, char *argv[]) {
         }
         std::cout << "Model dual results resized to " << (full_outputs[0]).shape() << " for merging" << std::endl;
         auto float_output_array10 = static_cast<float *>(full_outputs[0].flat<float>().data());
-        hive_segmentation::hz_merge(float_output_array10,
-                                    8,
-                                    9,
-                                    leftImage.rows,
-                                    leftImage.cols,
-                                    output_classes,
-                                    dual_output_classes,
-                                    image_height,
-                                    image_width);
+        dual_output_classes = hive_segmentation::hz_merge(
+            float_output_array10,
+            8,
+            9,
+            leftImage.rows,
+            leftImage.cols,
+            output_classes,
+            image_height,
+            image_width);
         // no break here because want to also run the case 8 when we have 10
       }
       case 8: {
@@ -1077,20 +1082,15 @@ int main(int argc, char *argv[]) {
         auto float_output_array8 = static_cast<float *>(resized_outputs[0].flat<float>().data());
 
         // need some temporary data structures
-        std::vector<float> merged_top_quad {};
-        merged_top_quad.reserve(sub_image_height * leftImage.cols * output_classes);
-        std::vector<float> merged_bottom_quad {};
-        merged_bottom_quad.reserve(sub_image_height * leftImage.cols * output_classes);
         std::vector<float> merged_left {};
-        merged_left.reserve(leftImage.rows * leftImage.cols * output_classes);
         std::vector<float> merged_right {};
-        merged_right.reserve(rightImage.rows * rightImage.cols * output_classes);
 
         for (std::size_t ihex = 0; ihex < hex_quads.size(); ++ihex) {
 //          std::cout << "Adding hex to quad " << ihex << " of size " << hex_quads[ihex].size() << std::endl;
           hive_segmentation::add_images(
               hex_quads[ihex],
-              &(float_output_array8[static_cast<int>(ihex) * sub_image_height * sub_image_width * output_classes]),
+              &(float_output_array8[static_cast<int>(ihex) * sub_image_height
+                  * sub_image_width * output_classes]),
               sub_image_height,
               sub_image_width,
               output_classes);
@@ -1101,97 +1101,93 @@ int main(int argc, char *argv[]) {
         // (  top    vt  bottom ) hz (  top    vt  bottom )
         //         left           hz           right
 
-        hive_segmentation::hz_merge(float_output_array8,
-                                    0,
-                                    1,
-                                    sub_image_height,
-                                    sub_image_width,
-                                    output_classes,
-                                    merged_top_quad,
-                                    sub_image_height,
-                                    leftImage.cols);
+        auto merged_top_quad = hive_segmentation::hz_merge(
+            float_output_array8,
+            0,
+            1,
+            sub_image_height,
+            sub_image_width,
+            output_classes,
+            sub_image_height,
+            leftImage.cols);
 
-        hive_segmentation::hz_merge(float_output_array8,
-                                    2,
-                                    3,
-                                    sub_image_height,
-                                    sub_image_width,
-                                    output_classes,
-                                    merged_bottom_quad,
-                                    sub_image_height,
-                                    leftImage.cols);
+        auto merged_bottom_quad = hive_segmentation::hz_merge(
+            float_output_array8,
+            2,
+            3,
+            sub_image_height,
+            sub_image_width,
+            output_classes,
+            sub_image_height,
+            leftImage.cols);
 
-        hive_segmentation::vert_merge(merged_top_quad,
-                                      merged_bottom_quad,
-                                      sub_image_height,
-                                      leftImage.cols,
-                                      output_classes,
-                                      merged_left,
-                                      leftImage.rows,
-                                      leftImage.cols);
+        merged_left = hive_segmentation::vert_merge(
+            merged_top_quad,
+            merged_bottom_quad,
+            sub_image_height,
+            leftImage.cols,
+            output_classes,
+            leftImage.rows,
+            leftImage.cols);
 
-        merged_top_quad.clear();
-        merged_bottom_quad.clear();
+        merged_top_quad = hive_segmentation::hz_merge(
+            float_output_array8,
+            4,
+            5,
+            sub_image_height,
+            sub_image_width,
+            output_classes,
+            sub_image_height,
+            leftImage.cols);
 
-        hive_segmentation::hz_merge(float_output_array8,
-                                    4,
-                                    5,
-                                    sub_image_height,
-                                    sub_image_width,
-                                    output_classes,
-                                    merged_top_quad,
-                                    sub_image_height,
-                                    leftImage.cols);
+        merged_bottom_quad = hive_segmentation::hz_merge(
+            float_output_array8,
+            6,
+            7,
+            sub_image_height,
+            sub_image_width,
+            output_classes,
+            sub_image_height,
+            leftImage.cols);
 
-        hive_segmentation::hz_merge(float_output_array8,
-                                    6,
-                                    7,
-                                    sub_image_height,
-                                    sub_image_width,
-                                    output_classes,
-                                    merged_bottom_quad,
-                                    sub_image_height,
-                                    leftImage.cols);
-
-        hive_segmentation::vert_merge(merged_top_quad,
-                                      merged_bottom_quad,
-                                      sub_image_height,
-                                      rightImage.cols,
-                                      output_classes,
-                                      merged_right,
-                                      rightImage.rows,
-                                      rightImage.cols);
+        merged_right = hive_segmentation::vert_merge(
+            merged_top_quad,
+            merged_bottom_quad,
+            sub_image_height,
+            rightImage.cols,
+            output_classes,
+            rightImage.rows,
+            rightImage.cols);
 
         // test for 10 classes (quads and dual) and do merge accordingly
         if (!dual_output_classes.empty()) {
           std::cout << "Combining Dual and Quad classes" << std::endl;
-          std::vector<float> merged_quad_classes {};
-          merged_quad_classes.reserve(image_height * image_width * output_classes);
-          hive_segmentation::hz_merge(merged_left,
-                                      merged_right,
-                                      rightImage.rows,
-                                      rightImage.cols,
-                                      output_classes,
-                                      merged_quad_classes,
-                                      image_height,
-                                      image_width);
+          auto merged_quad_classes = hive_segmentation::hz_merge(
+              merged_left,
+              merged_right,
+              rightImage.rows,
+              rightImage.cols,
+              output_classes,
+              image_height,
+              image_width);
           // then combine merged_quad_classes and dual_output_classes
-          hive_segmentation::add_images(merged_quad_classes,
-                                        dual_output_classes,
-                                        image_height,
-                                        image_width,
-                                        output_classes,
-                                        merged_output_classes);
+          hive_segmentation::add_images(
+              merged_quad_classes,
+              dual_output_classes,
+              image_height,
+              image_width,
+              output_classes,
+              merged_output_classes);
         } else {
           // just merge the left and right from the quads
-          hive_segmentation::hz_merge(merged_left,
-                                      merged_right,
-                                      rightImage.rows,
-                                      rightImage.cols,
-                                      output_classes,
-                                      merged_output_classes,
-                                      image_height,
-                                      image_width);
+          merged_output_classes = hive_segmentation::hz_merge(
+              merged_left,
+              merged_right,
+              rightImage.rows,
+              rightImage.cols,
+              output_classes,
+              image_height,
+              image_width);
         }
 
         break;
@@ -1205,15 +1201,15 @@ int main(int argc, char *argv[]) {
         std::cout << "Model results resized to " << (resized_outputs[0]).shape() << " for merging" << std::endl;
         auto float_output_array2 = static_cast<float *>(resized_outputs[0].flat<float>().data());
         std::cout << "Merging output classes" << std::endl;
-        hive_segmentation::hz_merge(float_output_array2,
-                                    0,
-                                    1,
-                                    leftImage.rows,
-                                    leftImage.cols,
-                                    output_classes,
-                                    merged_output_classes,
-                                    image_height,
-                                    image_width);
+        merged_output_classes = hive_segmentation::hz_merge(
+            float_output_array2,
+            0,
+            1,
+            leftImage.rows,
+            leftImage.cols,
+            output_classes,
+            image_height,
+            image_width);
         break;
       }
       // TODO dwh: need to get merged_output_classes into new format
