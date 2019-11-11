@@ -316,6 +316,7 @@ int load_images_from_file(const string &image_filename,
   // if there is no results file, or outputs is not equal to inputs, build outputs based on image_filename file names with tif extension
   if (image_result_filename.empty() || (bulk_images->size() != bulk_results->size())) {
     bulk_results->clear();
+    bulk_results->reserve(bulk_images->size());
     for (auto const &image_file : *bulk_images) {
       bulk_results->emplace_back(image_file.substr(0, image_file.find_last_of('.'))+".tif");
     }
@@ -336,6 +337,7 @@ std::vector<float> blender_array(int num_vals, int sub_size) {
   assert(overlap >= 0);
   std::cout << "Making blending array of size " << num_vals << ", with offset " << offset << ", overlap " << overlap << " and sub_size " << sub_size << std::endl;
   std::vector<float> blender {};
+  blender.reserve(num_vals);
   for (std::size_t i=0; i<num_vals; i++) {
     if (i <= offset) {
       // only first sub image will be used
@@ -843,7 +845,7 @@ int main(int argc, char *argv[]) {
         // Determine if we want to do another layer of decomposition
         if (do_hexes && static_cast<float>(sub_image_height) > 1.5 * static_cast<float>(input_height)) {
           // Make another subimage vector for hex images and populate it
-          hex_image_height = overlap_pixels + static_cast<int>(static_cast<float>(sub_images[0].rows) / 2.f);
+          hex_image_height = overlap_pixels + (sub_images[0].rows / 2);
           // TODO: is the aspect ratio valid here?
           hex_image_width = static_cast<int>(static_cast<float>(hex_image_height) / input_aspect_ratio);
           std::cout << "Making hex subimages with height " << hex_image_height << " and width " << hex_image_width << std::endl;
@@ -974,8 +976,11 @@ int main(int argc, char *argv[]) {
         int sub_offset = hquad * 4;
 //        std::cout << "Running hex " << hquad << " with offset " << sub_offset << " and size " << hex_image_height * sub_image_width * output_classes << std::endl;
         std::vector<float> merged_top_quad {};
+        merged_top_quad.reserve(hex_image_height * sub_image_width * output_classes);
         std::vector<float> merged_bottom_quad {};
+        merged_bottom_quad.reserve(hex_image_height * sub_image_width * output_classes);
         std::vector<float> hex_quad {};
+        hex_quad.reserve(sub_image_height * sub_image_width * output_classes);
         hive_segmentation::hz_merge(float_output_hex_array,
                                     sub_offset + 0,
                                     sub_offset + 1,
@@ -1032,10 +1037,14 @@ int main(int argc, char *argv[]) {
     // resize and merge to get output size depending on switch/case
     std::cout << "Make output array" << std::endl;
     std::vector<float> merged_output_classes {};
+    merged_output_classes.reserve(image_height * image_width * output_classes);
     std::vector<float> dual_output_classes {};
+    dual_output_classes.reserve(image_height * image_width * output_classes);
     Status resize_status;
     std::vector<Tensor> resized_outputs {};
+    resized_outputs.reserve(image_height * image_width * output_classes);
     std::vector<Tensor> full_outputs {};
+    full_outputs.reserve(image_height * image_width * output_classes);
     switch (sub_images.size()) {
       case 10: {
         // make dual output merged classes for later combining with quads
@@ -1069,9 +1078,13 @@ int main(int argc, char *argv[]) {
 
         // need some temporary data structures
         std::vector<float> merged_top_quad {};
+        merged_top_quad.reserve(sub_image_height * leftImage.cols * output_classes);
         std::vector<float> merged_bottom_quad {};
+        merged_bottom_quad.reserve(sub_image_height * leftImage.cols * output_classes);
         std::vector<float> merged_left {};
+        merged_left.reserve(leftImage.rows * leftImage.cols * output_classes);
         std::vector<float> merged_right {};
+        merged_right.reserve(rightImage.rows * rightImage.cols * output_classes);
 
         for (std::size_t ihex = 0; ihex < hex_quads.size(); ++ihex) {
 //          std::cout << "Adding hex to quad " << ihex << " of size " << hex_quads[ihex].size() << std::endl;
@@ -1153,6 +1166,7 @@ int main(int argc, char *argv[]) {
         if (!dual_output_classes.empty()) {
           std::cout << "Combining Dual and Quad classes" << std::endl;
           std::vector<float> merged_quad_classes {};
+          merged_quad_classes.reserve(image_height * image_width * output_classes);
           hive_segmentation::hz_merge(merged_left,
                                       merged_right,
                                       rightImage.rows,
