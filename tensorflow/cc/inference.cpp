@@ -940,9 +940,9 @@ int main(int argc, char *argv[]) {
       // resize and normalize input by mean and std
       std::cout << "Resizing and Normalizing quad input tensor" << std::endl;
       Status resized_normalize_quad_status = ::hive_segmentation::NormalizeTensor(quad_tensor,
-                                                                             &resized_normal_quad_tensors,
-                                                                             input_height,
-                                                                             input_width); //, input_mean, input_std);
+                                                                                  &resized_normal_quad_tensors,
+                                                                                  input_height,
+                                                                                  input_width); //, input_mean, input_std);
       if (!resized_normalize_quad_status.ok()) {
         LOG(ERROR) << "Error: Input quad tensor normalization failed: " << resized_normalize_quad_status;
         return -1;
@@ -1013,34 +1013,31 @@ int main(int argc, char *argv[]) {
         int sub_offset = hquad * 4;
         std::cout << "Merging four hexes into hex quad " << hquad << std::endl;
 //        std::cout << "Running hex " << hquad << " with offset " << sub_offset << " and size " << hex_image_height * quad_image_width * output_classes << std::endl;
-        auto merged_top_quad = hive_segmentation::hz_merge(
-            float_output_hex_array,
-            sub_offset + 0,
-            sub_offset + 1,
-            hex_image_height,
-            hex_image_width,
-            output_classes,
-            hex_image_height,
-            quad_image_width);
+        auto merged_top_quad = hive_segmentation::hz_merge(float_output_hex_array,
+                                                           sub_offset + 0,
+                                                           sub_offset + 1,
+                                                           hex_image_height,
+                                                           hex_image_width,
+                                                           output_classes,
+                                                           hex_image_height,
+                                                           quad_image_width);
 
-        auto merged_bottom_quad = hive_segmentation::hz_merge(
-            float_output_hex_array,
-            sub_offset + 2,
-            sub_offset + 3,
-            hex_image_height,
-            hex_image_width,
-            output_classes,
-            hex_image_height,
-            quad_image_width);
+        auto merged_bottom_quad = hive_segmentation::hz_merge(float_output_hex_array,
+                                                              sub_offset + 2,
+                                                              sub_offset + 3,
+                                                              hex_image_height,
+                                                              hex_image_width,
+                                                              output_classes,
+                                                              hex_image_height,
+                                                              quad_image_width);
 
-        auto hex_quad = hive_segmentation::vert_merge(
-            merged_top_quad,
-            merged_bottom_quad,
-            hex_image_height,
-            quad_image_width,
-            output_classes,
-            quad_image_height,
-            quad_image_width);
+        auto hex_quad = hive_segmentation::vert_merge(merged_top_quad,
+                                                      merged_bottom_quad,
+                                                      hex_image_height,
+                                                      quad_image_width,
+                                                      output_classes,
+                                                      quad_image_height,
+                                                      quad_image_width);
 
         hex_quads.emplace_back(hex_quad);
       }
@@ -1064,18 +1061,17 @@ int main(int argc, char *argv[]) {
         return -1;
       }
       auto const &quad_output = quad_outputs[0];
-      output_classes = uint(quad_output.shape().dim_size(3));
+      output_classes = static_cast<uint>(quad_output.shape().dim_size(3));
       std::cout << "Quad output shape is " << quad_output.shape() << " with " << quad_output.shape().dims() << " dimensions and " << output_classes << " classes" << std::endl;
 
 
       // resize and merge hexes if available to get quad output sized images
-      Status resize_quad_status;
       std::vector<Tensor> resized_quad_outputs {};
       resized_quad_outputs.reserve(quad_image_height * quad_image_width * output_classes);
       std::vector<Tensor> quad_outputs {};
       quad_outputs.reserve(quad_image_height * quad_image_width * output_classes);
 
-      resize_quad_status = ::hive_segmentation::ResizeTensor(quad_output, &resized_quad_outputs, quad_image_height, quad_image_width);
+      Status resize_quad_status = ::hive_segmentation::ResizeTensor(quad_output, &resized_quad_outputs, quad_image_height, quad_image_width);
       if (!resize_quad_status.ok()) {
         LOG(ERROR) << "Error: Resizing quad output from model failed: " << resize_quad_status;
         return -1;
@@ -1085,12 +1081,12 @@ int main(int argc, char *argv[]) {
 
       for (std::size_t ihex = 0; ihex < hex_quads.size(); ++ihex) {
         std::cout << "Adding hex-quad " << ihex << " to sub-images" << std::endl;
-        hive_segmentation::add_images(
-            hex_quads[ihex],
-            &(float_output_quad_array[static_cast<int>(ihex) * quad_image_height * quad_image_width * output_classes]),
-            quad_image_height,
-            quad_image_width,
-            output_classes);
+        hive_segmentation::add_images(hex_quads[ihex],
+                                      &(float_output_quad_array[static_cast<int>(ihex) * quad_image_height
+                                          * quad_image_width * output_classes]),
+                                      quad_image_height,
+                                      quad_image_width,
+                                      output_classes);
       }
 
       // Merge the above 8 (4 quads * 2 subs) into 2 (2 sub-images) arrays that can be added later
@@ -1104,34 +1100,31 @@ int main(int argc, char *argv[]) {
       // (  top    vt  bottom ) hz (  top    vt  bottom )
       //         left           hz           right
 
-      auto merged_top_quad = hive_segmentation::hz_merge(
-          float_output_quad_array,
-          sub_offset + 0,
-          sub_offset + 1,
-          quad_image_height,
-          quad_image_width,
-          output_classes,
-          quad_image_height,
-          leftImage.cols);
+      auto merged_top_quad = hive_segmentation::hz_merge(float_output_quad_array,
+                                                         sub_offset + 0,
+                                                         sub_offset + 1,
+                                                         quad_image_height,
+                                                         quad_image_width,
+                                                         output_classes,
+                                                         quad_image_height,
+                                                         leftImage.cols);
 
-      auto merged_bottom_quad = hive_segmentation::hz_merge(
-          float_output_quad_array,
-          sub_offset + 2,
-          sub_offset + 3,
-          quad_image_height,
-          quad_image_width,
-          output_classes,
-          quad_image_height,
-          leftImage.cols);
+        auto merged_bottom_quad = hive_segmentation::hz_merge(float_output_quad_array,
+                                                              sub_offset + 2,
+                                                              sub_offset + 3,
+                                                              quad_image_height,
+                                                              quad_image_width,
+                                                              output_classes,
+                                                              quad_image_height,
+                                                              leftImage.cols);
 
-      auto merged_quad = hive_segmentation::vert_merge(
-          merged_top_quad,
-          merged_bottom_quad,
-          quad_image_height,
-          leftImage.cols,
-          output_classes,
-          leftImage.rows,
-          leftImage.cols);
+        auto merged_quad = hive_segmentation::vert_merge(merged_top_quad,
+                                                         merged_bottom_quad,
+                                                         quad_image_height,
+                                                         leftImage.cols,
+                                                         output_classes,
+                                                         leftImage.rows,
+                                                         leftImage.cols);
 
         quad_subs.emplace_back(merged_quad);
       }
@@ -1176,26 +1169,25 @@ int main(int argc, char *argv[]) {
 
     for (std::size_t iquad = 0; iquad < quad_subs.size(); ++iquad) {
       std::cout << "Adding quad sub-image " << iquad << " to image" << std::endl;
-      hive_segmentation::add_images(
-          quad_subs[iquad],
-          &(float_output_array[static_cast<int>(iquad) * sub_image_height * sub_image_width * output_classes]),
-          sub_image_height,
-          sub_image_width,
-          output_classes);
+      hive_segmentation::add_images(quad_subs[iquad],
+                                    &(float_output_array[static_cast<int>(iquad) * sub_image_height * sub_image_width
+                                        * output_classes]),
+                                    sub_image_height,
+                                    sub_image_width,
+                                    output_classes);
     }
 
     switch (sub_images.size()) {
       case 2: {
         std::cout << "Merging two output sub-images" << std::endl;
-        merged_output_classes = hive_segmentation::hz_merge(
-            float_output_array,
-            0,
-            1,
-            leftImage.rows,
-            leftImage.cols,
-            output_classes,
-            image_height,
-            image_width);
+        merged_output_classes = hive_segmentation::hz_merge(float_output_array,
+                                                            0,
+                                                            1,
+                                                            leftImage.rows,
+                                                            leftImage.cols,
+                                                            output_classes,
+                                                            image_height,
+                                                            image_width);
         break;
       }
       case 1: {
