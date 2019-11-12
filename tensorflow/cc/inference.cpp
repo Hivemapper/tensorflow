@@ -1005,7 +1005,8 @@ int main(int argc, char *argv[]) {
       std::cout << "Model hex results resized to " << (resized_hex_outputs[0]).shape() << " for sub merging" << std::endl;
       output_classes = uint(hex_output.shape().dim_size(3));
 
-      // Merge the above 32 hex images into 8 arrays of sub images that can be added later
+      // Merge the above 32 (4 hexes * 4 quads * 2 subs) hex images into 8 (4 quads * 2 subs) arrays of sub images that can be added later
+      // (Or 16 (4 hexes * 4 quads * 1 subs) into 4 (4 quads * 1 subs) arrays)
       auto float_output_hex_array = static_cast<float *>(resized_hex_outputs[0].flat<float>().data());
 
       for (int hquad = 0; hquad < quad_images.size(); ++hquad) {
@@ -1092,11 +1093,13 @@ int main(int argc, char *argv[]) {
             output_classes);
       }
 
+      // Merge the above 8 (4 quads * 2 subs) into 2 (2 sub-images) arrays that can be added later
+      // (Or 4 (4 quads * 1 subs) into 1 (sub-images) arrays)
       for (int iquad = 0; iquad < sub_images.size(); ++iquad) {
         int sub_offset = iquad * 4;
         std::cout << "Merging four quads into quad sub-image " << iquad << std::endl;
 
-      // now have 8 dimensional array of size quad_image_height x quad_image_width x num_classes
+      // now have 4x dimensional array of size quad_image_height x quad_image_width x num_classes
       // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
       // (  top    vt  bottom ) hz (  top    vt  bottom )
       //         left           hz           right
@@ -1183,7 +1186,7 @@ int main(int argc, char *argv[]) {
 
     switch (sub_images.size()) {
       case 2: {
-        std::cout << "Merging 2 output sub-images" << std::endl;
+        std::cout << "Merging two output sub-images" << std::endl;
         merged_output_classes = hive_segmentation::hz_merge(
             float_output_array,
             0,
@@ -1196,14 +1199,14 @@ int main(int argc, char *argv[]) {
         break;
       }
       case 1: {
-        std::cout << "Single output image" << std::endl;
+        std::cout << "Using single output sub-image" << std::endl;
         merged_output_classes.reserve(image_height * image_width * output_classes);
         for (std::size_t ival = 0; ival < (image_height * image_width * output_classes); ++ival) {
           merged_output_classes.emplace_back(float_output_array[ival]);
         }
         break;
       }
-      default:  LOG(ERROR) << "Error: Invalid number of sub-images: " << sub_images.size();
+      default: LOG(ERROR) << "Error: Invalid number of sub-images: " << sub_images.size();
         return -1;
     }
 
