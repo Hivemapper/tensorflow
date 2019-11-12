@@ -548,9 +548,8 @@ void add_images(const std::vector<float> &first_image,
   for (auto i = 0; i < num_x; i++) {
     for (auto j = 0; j < num_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
-        float segmentation_value = 0.f;
         // use both sub images in equal proportion
-        segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
+        float segmentation_value = 0.5f * first_image[((i * num_y + j) * num_classes) + s];
         segmentation_value += 0.5f * second_image[((i * num_y + j) * num_classes) + s];
         merged_output.emplace_back(segmentation_value);
       }
