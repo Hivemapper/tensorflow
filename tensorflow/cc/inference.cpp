@@ -572,7 +572,8 @@ void add_images(const std::vector<float> &first_image,
     for (auto j = 0; j < num_y; j++) {
       for (auto s = 0; s < num_classes; s++) {
         second_image[((i * num_y + j) * num_classes) + s] *= 0.5f;
-        second_image[((i * num_y + j) * num_classes) + s] += 0.5f * first_image[((i * num_y + j) * num_classes) + s];
+        // Note that TF rows and columns are reversed
+        second_image[((i * num_y + j) * num_classes) + s] += 0.5f * first_image[((j * num_y + i) * num_classes) + s];
       }
     }
   }
@@ -1082,8 +1083,7 @@ int main(int argc, char *argv[]) {
       for (std::size_t ihex = 0; ihex < hex_quads.size(); ++ihex) {
         std::cout << "Adding hex-quad " << ihex << " to sub-images" << std::endl;
         hive_segmentation::add_images(hex_quads[ihex],
-                                      &(float_output_quad_array[static_cast<int>(ihex) * quad_image_height
-                                          * quad_image_width * output_classes]),
+                                      &(float_output_quad_array[static_cast<int>(ihex) * quad_image_height * quad_image_width * output_classes]),
                                       quad_image_height,
                                       quad_image_width,
                                       output_classes);
@@ -1095,19 +1095,19 @@ int main(int argc, char *argv[]) {
         int sub_offset = iquad * 4;
         std::cout << "Merging four quads into quad sub-image " << iquad << std::endl;
 
-      // now have 4x dimensional array of size quad_image_height x quad_image_width x num_classes
-      // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
-      // (  top    vt  bottom ) hz (  top    vt  bottom )
-      //         left           hz           right
+        // now have 4x dimensional array of size quad_image_height x quad_image_width x num_classes
+        // ((0 hz 1) vt (2 hz 3)) hz ((4 hz 5) vt (6 hz 7))
+        // (  top    vt  bottom ) hz (  top    vt  bottom )
+        //         left           hz           right
 
-      auto merged_top_quad = hive_segmentation::hz_merge(float_output_quad_array,
-                                                         sub_offset + 0,
-                                                         sub_offset + 1,
-                                                         quad_image_height,
-                                                         quad_image_width,
-                                                         output_classes,
-                                                         quad_image_height,
-                                                         leftImage.cols);
+        auto merged_top_quad = hive_segmentation::hz_merge(float_output_quad_array,
+                                                           sub_offset + 0,
+                                                           sub_offset + 1,
+                                                           quad_image_height,
+                                                           quad_image_width,
+                                                           output_classes,
+                                                           quad_image_height,
+                                                           leftImage.cols);
 
         auto merged_bottom_quad = hive_segmentation::hz_merge(float_output_quad_array,
                                                               sub_offset + 2,
@@ -1170,8 +1170,7 @@ int main(int argc, char *argv[]) {
     for (std::size_t iquad = 0; iquad < quad_subs.size(); ++iquad) {
       std::cout << "Adding quad sub-image " << iquad << " to image" << std::endl;
       hive_segmentation::add_images(quad_subs[iquad],
-                                    &(float_output_array[static_cast<int>(iquad) * sub_image_height * sub_image_width
-                                        * output_classes]),
+                                    &(float_output_array[static_cast<int>(iquad) * sub_image_height * sub_image_width * output_classes]),
                                     sub_image_height,
                                     sub_image_width,
                                     output_classes);
