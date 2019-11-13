@@ -704,7 +704,7 @@ int main(int argc, char *argv[]) {
   bool do_hexes = true;
 //  float overlap_fraction = 1.1;
   int overlap_pixels = 32;
-  bool use_gpu = false;
+  bool use_gpu = true;
 
   // data structures to hold multiple image and result names in sequence order
   std::vector<std::string> bulk_images {};
@@ -736,7 +736,7 @@ int main(int argc, char *argv[]) {
     Flag("do_quads", &do_quads, "do quad breakdown in addition to squaring up--default is true"),
     Flag("do_hexes", &do_hexes, "do hex breakdown in addition to quads and squaring up--default is true"),
     // TODO dwh: we could set this to an integer to indicate which gpu to use if there are more than one and -1 to disable??
-    Flag("use_gpu", &use_gpu, "use gpu--default is false"),
+    Flag("use_gpu", &use_gpu, "use gpu if one is available--default is true"),
   };
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
@@ -863,7 +863,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Determine if we want to do another layer of decomposition
-        if (do_hexes && static_cast<float>(quad_image_height) > 1.5 * static_cast<float>(input_height)) {
+        if (do_hexes && static_cast<float>(quad_image_height) > 1.4 * static_cast<float>(input_height)) {
           // Make another subimage vector for hex images and populate it
           hex_image_height = overlap_pixels + (quad_image_height / 2);
           // TODO: is the aspect ratio valid here?
