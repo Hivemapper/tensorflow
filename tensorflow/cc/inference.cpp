@@ -853,33 +853,35 @@ int main(int argc, char *argv[]) {
       rightImage = orig_image_mat(sub_rectangles.back());
       sub_images.emplace_back(rightImage);
 
-      if (do_quads && static_cast<float>(sub_image_height) > 1.4 * static_cast<float>(input_height)) {
-        quad_image_height = std::max(overlap_pixels + static_cast<int>(static_cast<float>(image_height) / 2.f), input_height);
-//        quad_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
-        quad_image_width = static_cast<int>(static_cast<float>(quad_image_height) / input_aspect_ratio);
-        std::cout << "Breaking up each sub-image into four quad-images with height " << quad_image_height << " and width " << quad_image_width << std::endl;
-        for (auto sub_image : sub_images) {
-          hive_segmentation::quad_decomposition(sub_image, quad_image_width, quad_image_height, quad_images, quad_rectangles);
-        }
-
-        // Determine if we want to do another layer of decomposition
-        if (do_hexes && static_cast<float>(quad_image_height) > 1.4 * static_cast<float>(input_height)) {
-          // Make another subimage vector for hex images and populate it
-          hex_image_height = overlap_pixels + (quad_image_height / 2);
-          // TODO: is the aspect ratio valid here?
-          hex_image_width = static_cast<int>(static_cast<float>(hex_image_height) / input_aspect_ratio);
-          std::cout << "Breaking up each quad-image into four hex-images with height " << hex_image_height << " and width " << hex_image_width << std::endl;
-          for (auto quad_image : quad_images) {
-            hive_segmentation::quad_decomposition(quad_image, hex_image_width, hex_image_height, hex_images, hex_rectangles);
-          }
-        }
-      }
     } else {
       //only have one image to process and no recombining
       std::cout << "Have single image with height " << sub_image_height << " and width " << sub_image_width << std::endl;
       sub_images.emplace_back(orig_image_mat);
       sub_rectangles.emplace_back(cv::Rect(0, 0, image_width, image_height));
     }
+
+    if (do_quads && static_cast<float>(sub_image_height) > 1.4 * static_cast<float>(input_height)) {
+      quad_image_height = std::max(overlap_pixels + static_cast<int>(static_cast<float>(image_height) / 2.f), input_height);
+  //        quad_image_height = std::max(static_cast<int>(static_cast<float>(image_height) * overlap_fraction / 2.f), input_height);
+      quad_image_width = static_cast<int>(static_cast<float>(quad_image_height) / input_aspect_ratio);
+      std::cout << "Breaking up each sub-image into four quad-images with height " << quad_image_height << " and width " << quad_image_width << std::endl;
+      for (auto sub_image : sub_images) {
+        hive_segmentation::quad_decomposition(sub_image, quad_image_width, quad_image_height, quad_images, quad_rectangles);
+      }
+
+      // Determine if we want to do another layer of decomposition
+      if (do_hexes && static_cast<float>(quad_image_height) > 1.4 * static_cast<float>(input_height)) {
+        // Make another subimage vector for hex images and populate it
+        hex_image_height = overlap_pixels + (quad_image_height / 2);
+        // TODO: is the aspect ratio valid here?
+        hex_image_width = static_cast<int>(static_cast<float>(hex_image_height) / input_aspect_ratio);
+        std::cout << "Breaking up each quad-image into four hex-images with height " << hex_image_height << " and width " << hex_image_width << std::endl;
+        for (auto quad_image : quad_images) {
+          hive_segmentation::quad_decomposition(quad_image, hex_image_width, hex_image_height, hex_images, hex_rectangles);
+        }
+      }
+    }
+
 //    std::cout << "ROI 0 x: " << sub_rectangles[0].x << " y: " << sub_rectangles[0].y << " height " << sub_rectangles[0].height << " and width " << sub_rectangles[0].width  << std::endl;
 //    std::cout << "ROI 3 x: " << sub_rectangles[3].x << " y: " << sub_rectangles[3].y << " height " << sub_rectangles[3].height << " and width " << sub_rectangles[3].width  << std::endl;
 
@@ -1192,8 +1194,14 @@ int main(int argc, char *argv[]) {
       case 1: {
         std::cout << "Using single output sub-image" << std::endl;
         merged_output_classes.reserve(image_height * image_width * output_classes);
-        for (std::size_t ival = 0; ival < (image_height * image_width * output_classes); ++ival) {
-          merged_output_classes.emplace_back(float_output_array[ival]);
+        // Reverse cols and rows for tensorflow data
+        for (uint i = 0; i < image_width; i++) {
+          for (uint j = 0; j < image_height; j++) {
+            for (uint s = 0; s < output_classes; s++) {
+              auto indx = static_cast<std::size_t>((j * image_height + i) * output_classes + s);
+              merged_output_classes.emplace_back(float_output_array[indx]);
+            }
+          }
         }
         break;
       }
